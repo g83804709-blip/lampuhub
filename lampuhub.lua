@@ -1,44 +1,122 @@
--- Services
+-- LampuHub
+-- UI + state/connection cleanup
+-- Tidak termasuk auto-farm / auto-pickup / teleport exploit.
+
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
-local LogService = game:GetService("LogService")
 local UserInputService = game:GetService("UserInputService")
 
 local LP = Players.LocalPlayer
+local PlayerGui = LP:WaitForChild("PlayerGui")
 
--- State
-local autoEnabled = false
-local flying = false
-local currentTween = nil
-local dropPoint = nil
-local monitorConnection = nil
+-- =========================================================
+-- STATE
+-- =========================================================
+
+local enabled = false
 local flySpeed = 300
-local eggQueue = {}
-local currentEggIndex = 1
-local isExecuting = false
+local dropPoint = nil
 
--- Biome names
+local connections = {}
+local characterConnections = {}
+
+-- Nama biome yang sudah diperbaiki
 local biomes = {
-    "Forest", "Lake", "Desert", "Jungle", "Snow", "Volcano",
-    "Abyss Ocean", "Prehistoric", "Cosmic", "Cherry Blossom",
-    "Titan Temple", "Angels & Demons", "Angels and Demons"
+    "Forest",
+    "Lake",
+    "Desert",
+    "Jungle",
+    "Snow",
+    "Volcano",
+    "Abyss Ocean",
+    "Prehistoric",
+    "Cosmic",
+    "Cherry Blossom",
+    "Titan Temple",
+    "Angels & Demons"
 }
 
--- ========== UI ==========
+-- =========================================================
+-- CLEANUP
+-- =========================================================
+
+local function disconnectList(list)
+    for _, connection in ipairs(list) do
+        if connection then
+            pcall(function()
+                connection:Disconnect()
+            end)
+        end
+    end
+
+    table.clear(list)
+end
+
+local function cleanup()
+    disconnectList(connections)
+    disconnectList(characterConnections)
+end
+
+-- =========================================================
+-- CHARACTER
+-- =========================================================
+
+local function getCharacter()
+    local character = LP.Character
+    if not character then
+        return nil, nil, nil
+    end
+
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+
+    return character, hrp, humanoid
+end
+
+local function setupCharacter(character)
+    disconnectList(characterConnections)
+
+    local humanoid = character:WaitForChild("Humanoid", 10)
+
+    if humanoid then
+        table.insert(characterConnections,
+            humanoid.Died:Connect(function()
+                enabled = false
+            end)
+        )
+    end
+end
+
+-- =========================================================
+-- GUI
+-- =========================================================
+
+local oldGui = PlayerGui:FindFirstChild("LampuHub")
+
+if oldGui then
+    oldGui:Destroy()
+end
+
 local gui = Instance.new("ScreenGui")
 gui.Name = "LampuHub"
 gui.ResetOnSpawn = false
-gui.Parent = LP:WaitForChild("PlayerGui")
+gui.IgnoreGuiInset = true
+gui.Parent = PlayerGui
+
+-- =========================================================
+-- MAIN BUTTON
+-- =========================================================
 
 local mainBtn = Instance.new("TextButton")
-mainBtn.Size = UDim2.new(0, 70, 0, 70)
-mainBtn.Position = UDim2.new(0.05, 0, 0.45, 0)
-mainBtn.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
-mainBtn.Text = "LampuHub"
-mainBtn.TextColor3 = Color3.new(1, 1, 1)
-mainBtn.TextScaled = true
+mainBtn.Name = "MainButton"
+mainBtn.Size = UDim2.fromOffset(58, 58)
+mainBtn.Position = UDim2.new(0, 18, 0.5, -29)
+mainBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+mainBtn.Text = "LH"
+mainBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+mainBtn.TextSize = 18
 mainBtn.Font = Enum.Font.GothamBold
+mainBtn.AutoButtonColor = false
 mainBtn.Parent = gui
 
 local mainCorner = Instance.new("UICorner")
@@ -46,521 +124,342 @@ mainCorner.CornerRadius = UDim.new(1, 0)
 mainCorner.Parent = mainBtn
 
 local mainStroke = Instance.new("UIStroke")
-mainStroke.Color = Color3.fromRGB(255, 255, 0)
-mainStroke.Thickness = 3
+mainStroke.Color = Color3.fromRGB(255, 210, 60)
+mainStroke.Thickness = 2
 mainStroke.Parent = mainBtn
 
-local colors = {
-    Color3.fromRGB(255, 0, 0), Color3.fromRGB(0, 255, 0),
-    Color3.fromRGB(0, 0, 255), Color3.fromRGB(255, 255, 0),
-    Color3.fromRGB(255, 0, 255), Color3.fromRGB(0, 255, 255)
-}
-task.spawn(function()
-    local i = 1
-    while gui.Parent do
-        i = i % #colors + 1
-        mainBtn.BackgroundColor3 = colors[i]
-        task.wait(0.35)
-    end
-end)
+-- =========================================================
+-- PANEL
+-- =========================================================
 
 local panel = Instance.new("Frame")
-panel.Size = UDim2.new(0, 260, 0, 200)
-panel.Position = UDim2.new(-0.3, 0, 0.35, 0)
-panel.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-panel.Visible = false
+panel.Name = "Panel"
+panel.AnchorPoint = Vector2.new(0, 0.5)
+panel.Size = UDim2.fromOffset(235, 190)
+panel.Position = UDim2.new(0, -250, 0.5, 0)
+panel.BackgroundColor3 = Color3.fromRGB(22, 22, 27)
+panel.BorderSizePixel = 0
+panel.Visible = true
 panel.Parent = gui
 
 local panelCorner = Instance.new("UICorner")
-panelCorner.CornerRadius = UDim.new(0, 10)
+panelCorner.CornerRadius = UDim.new(0, 14)
 panelCorner.Parent = panel
 
 local panelStroke = Instance.new("UIStroke")
-panelStroke.Color = Color3.fromRGB(255, 255, 0)
-panelStroke.Thickness = 2
+panelStroke.Color = Color3.fromRGB(65, 65, 75)
+panelStroke.Thickness = 1
 panelStroke.Parent = panel
 
-local titleLabel = Instance.new("TextLabel")
-titleLabel.Size = UDim2.new(1, 0, 0, 30)
-titleLabel.Position = UDim2.new(0, 0, 0, 5)
-titleLabel.BackgroundTransparency = 1
-titleLabel.Text = "LampuHub Menu"
-titleLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
-titleLabel.Font = Enum.Font.GothamBold
-titleLabel.TextScaled = true
-titleLabel.Parent = panel
+local padding = Instance.new("UIPadding")
+padding.PaddingTop = UDim.new(0, 12)
+padding.PaddingBottom = UDim.new(0, 12)
+padding.PaddingLeft = UDim.new(0, 12)
+padding.PaddingRight = UDim.new(0, 12)
+padding.Parent = panel
 
-local toggleBtn = Instance.new("TextButton")
-toggleBtn.Size = UDim2.new(0.9, 0, 0, 35)
-toggleBtn.Position = UDim2.new(0.05, 0, 0, 45)
-toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-toggleBtn.Text = "Auto Drop Egg: OFF"
-toggleBtn.TextColor3 = Color3.new(1, 1, 1)
-toggleBtn.TextScaled = true
-toggleBtn.Font = Enum.Font.Gotham
-toggleBtn.Parent = panel
+-- =========================================================
+-- TITLE
+-- =========================================================
 
-local toggleCorner = Instance.new("UICorner")
-toggleCorner.CornerRadius = UDim.new(0, 8)
-toggleCorner.Parent = toggleBtn
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -35, 0, 28)
+title.Position = UDim2.fromOffset(12, 8)
+title.BackgroundTransparency = 1
+title.Text = "LampuHub"
+title.TextColor3 = Color3.fromRGB(255, 215, 70)
+title.TextSize = 19
+title.Font = Enum.Font.GothamBold
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = panel
 
-local setDropBtn = Instance.new("TextButton")
-setDropBtn.Size = UDim2.new(0.9, 0, 0, 35)
-setDropBtn.Position = UDim2.new(0.05, 0, 0, 90)
-setDropBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-setDropBtn.Text = "Set Drop Point"
-setDropBtn.TextColor3 = Color3.new(1, 1, 1)
-setDropBtn.TextScaled = true
-setDropBtn.Font = Enum.Font.Gotham
-setDropBtn.Parent = panel
+local subtitle = Instance.new("TextLabel")
+subtitle.Size = UDim2.new(1, -24, 0, 18)
+subtitle.Position = UDim2.fromOffset(12, 34)
+subtitle.BackgroundTransparency = 1
+subtitle.Text = "Control Panel"
+subtitle.TextColor3 = Color3.fromRGB(145, 145, 155)
+subtitle.TextSize = 11
+subtitle.Font = Enum.Font.Gotham
+subtitle.TextXAlignment = Enum.TextXAlignment.Left
+subtitle.Parent = panel
 
-local setDropCorner = Instance.new("UICorner")
-setDropCorner.CornerRadius = UDim.new(0, 8)
-setDropCorner.Parent = setDropBtn
+-- =========================================================
+-- CLOSE BUTTON
+-- =========================================================
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.fromOffset(24, 24)
+closeBtn.Position = UDim2.new(1, -31, 0, 9)
+closeBtn.BackgroundTransparency = 1
+closeBtn.Text = "×"
+closeBtn.TextColor3 = Color3.fromRGB(180, 180, 185)
+closeBtn.TextSize = 22
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.Parent = panel
+
+-- =========================================================
+-- BUTTON CREATOR
+-- =========================================================
+
+local function createButton(name, text, y)
+    local button = Instance.new("TextButton")
+
+    button.Name = name
+    button.Size = UDim2.new(1, -24, 0, 34)
+    button.Position = UDim2.fromOffset(12, y)
+    button.BackgroundColor3 = Color3.fromRGB(38, 38, 45)
+    button.BorderSizePixel = 0
+    button.Text = text
+    button.TextColor3 = Color3.fromRGB(235, 235, 240)
+    button.TextSize = 13
+    button.Font = Enum.Font.GothamMedium
+    button.AutoButtonColor = false
+    button.Parent = panel
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 9)
+    corner.Parent = button
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(60, 60, 70)
+    stroke.Thickness = 1
+    stroke.Parent = button
+
+    button.MouseEnter:Connect(function()
+        TweenService:Create(
+            button,
+            TweenInfo.new(0.12),
+            {BackgroundColor3 = Color3.fromRGB(50, 50, 58)}
+        ):Play()
+    end)
+
+    button.MouseLeave:Connect(function()
+        TweenService:Create(
+            button,
+            TweenInfo.new(0.12),
+            {BackgroundColor3 = Color3.fromRGB(38, 38, 45)}
+        ):Play()
+    end)
+
+    return button
+end
+
+-- =========================================================
+-- TOGGLE
+-- =========================================================
+
+local toggleBtn = createButton(
+    "ToggleButton",
+    "System: OFF",
+    60
+)
+
+-- =========================================================
+-- DROP POINT
+-- =========================================================
+
+local dropBtn = createButton(
+    "DropPointButton",
+    "Set Drop Point",
+    101
+)
+
+-- =========================================================
+-- SPEED
+-- =========================================================
 
 local speedLabel = Instance.new("TextLabel")
-speedLabel.Size = UDim2.new(0.9, 0, 0, 25)
-speedLabel.Position = UDim2.new(0.05, 0, 0, 135)
+speedLabel.Size = UDim2.new(0.45, 0, 0, 20)
+speedLabel.Position = UDim2.fromOffset(12, 143)
 speedLabel.BackgroundTransparency = 1
 speedLabel.Text = "Speed: 300"
-speedLabel.TextColor3 = Color3.new(1, 1, 1)
-speedLabel.Font = Enum.Font.Gotham
-speedLabel.TextScaled = true
+speedLabel.TextColor3 = Color3.fromRGB(210, 210, 215)
+speedLabel.TextSize = 12
+speedLabel.Font = Enum.Font.GothamMedium
+speedLabel.TextXAlignment = Enum.TextXAlignment.Left
 speedLabel.Parent = panel
 
-local speedSlider = Instance.new("TextButton")
-speedSlider.Size = UDim2.new(0.9, 0, 0, 30)
-speedSlider.Position = UDim2.new(0.05, 0, 0, 162)
-speedSlider.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
-speedSlider.Text = "+ / -"
-speedSlider.TextColor3 = Color3.new(1, 1, 1)
-speedSlider.TextScaled = true
-speedSlider.Font = Enum.Font.Gotham
-speedSlider.Parent = panel
+local minusBtn = createButton(
+    "MinusButton",
+    "−",
+    141
+)
 
-local speedCorner = Instance.new("UICorner")
-speedCorner.CornerRadius = UDim.new(0, 8)
-speedCorner.Parent = speedSlider
+minusBtn.Size = UDim2.fromOffset(34, 30)
+minusBtn.Position = UDim2.new(1, -86, 0, 139)
+
+local plusBtn = createButton(
+    "PlusButton",
+    "+",
+    141
+)
+
+plusBtn.Size = UDim2.fromOffset(34, 30)
+plusBtn.Position = UDim2.new(1, -48, 0, 139)
+
+-- =========================================================
+-- PANEL ANIMATION
+-- =========================================================
+
+local panelOpen = false
+
+local function setPanel(open)
+    panelOpen = open
+
+    local target
+
+    if open then
+        target = UDim2.new(0, 88, 0.5, 0)
+    else
+        target = UDim2.new(0, -250, 0.5, 0)
+    end
+
+    TweenService:Create(
+        panel,
+        TweenInfo.new(
+            0.22,
+            Enum.EasingStyle.Quart,
+            Enum.EasingDirection.Out
+        ),
+        {
+            Position = target
+        }
+    ):Play()
+end
 
 mainBtn.MouseButton1Click:Connect(function()
-    panel.Visible = not panel.Visible
-    local targetPos = panel.Visible and UDim2.new(0.07, 0, 0.35, 0) or UDim2.new(-0.3, 0, 0.35, 0)
-    TweenService:Create(panel, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-        Position = targetPos
-    }):Play()
+    setPanel(not panelOpen)
 end)
 
--- ========== HELPERS ==========
-local function getCharacter()
-    local char = LP.Character
-    if not char then return nil, nil, nil end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    return char, hrp, hum
-end
+closeBtn.MouseButton1Click:Connect(function()
+    setPanel(false)
+end)
 
-local function tweenTo(targetPos, callback)
-    local _, hrp, hum = getCharacter()
-    if not hrp or not hum or hum.Health <= 0 then
-        if callback then callback(false) end
-        return
-    end
+-- =========================================================
+-- TOGGLE STATE
+-- =========================================================
 
-    flying = true
-    local startPos = hrp.Position
-    local distance = (targetPos - startPos).Magnitude
-    local duration = distance / flySpeed
-
-    if duration < 0.05 then
-        hrp.CFrame = CFrame.new(targetPos)
-        flying = false
-        if callback then callback(true) end
-        return
-    end
-
-    currentTween = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
-        CFrame = CFrame.new(targetPos)
-    })
-
-    currentTween.Completed:Connect(function()
-        flying = false
-        currentTween = nil
-        if callback then callback(true) end
-    end)
-
-    currentTween:Play()
-end
-
-local function stopFlying()
-    if currentTween then
-        currentTween:Cancel()
-        currentTween = nil
-    end
-    flying = false
-end
-
-local function findBiomePosition(biomeName)
-    local searchName = biomeName:lower():gsub("&", "and")
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") or obj:IsA("Model") then
-            local name = obj.Name:lower()
-            if name:find(searchName) or searchName:find(name) then
-                if obj:IsA("BasePart") then
-                    return obj.Position + Vector3.new(0, 10, 0)
-                elseif obj:IsA("Model") then
-                    local primary = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
-                    if primary then
-                        return primary.Position + Vector3.new(0, 10, 0)
-                    end
-                end
-            end
-        end
-    end
-    return nil
-end
-
-local function findEggsInArea(areaPos, radius)
-    local eggs = {}
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("ProximityPrompt") then
-            local part = obj.Parent
-            if part and part:IsA("BasePart") then
-                local dist = (part.Position - areaPos).Magnitude
-                if dist <= radius then
-                    table.insert(eggs, {prompt = obj, part = part, distance = dist})
-                end
-            end
-        end
-    end
-    table.sort(eggs, function(a, b) return a.distance < b.distance end)
-    return eggs
-end
-
-local function scanAllEggs()
-    local eggs = {}
-    local _, hrp, _ = getCharacter()
-    if not hrp then return eggs end
-
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("ProximityPrompt") then
-            local part = obj.Parent
-            if part and part:IsA("BasePart") then
-                local dist = (part.Position - hrp.Position).Magnitude
-                local hasGlow = false
-                local hasEffect = false
-                for _, child in pairs(part:GetChildren()) do
-                    if child:IsA("ParticleEmitter") or child:IsA("PointLight") or child:IsA("SpotLight") then
-                        hasGlow = true
-                    end
-                end
-                for _, child in pairs(part:GetChildren()) do
-                    if child.Name:lower():find("effect") or child.Name:lower():find("glow") or child.Name:lower():find("aura") then
-                        hasEffect = true
-                    end
-                end
-                table.insert(eggs, {
-                    prompt = obj,
-                    part = part,
-                    distance = dist,
-                    hasGlow = hasGlow or hasEffect,
-                    size = part.Size.Magnitude
-                })
-            end
-        end
-    end
-
-    table.sort(eggs, function(a, b)
-        if a.hasGlow ~= b.hasGlow then
-            return a.hasGlow
-        end
-        return a.size > b.size
-    end)
-
-    local top5 = {}
-    for i = 1, math.min(5, #eggs) do
-        table.insert(top5, eggs[i])
-    end
-    return top5
-end
-
-local function pickUpEgg(eggData)
-    if not eggData or not eggData.prompt then return false end
-    local prompt = eggData.prompt
-    local success = pcall(function()
-        if prompt.HoldDuration > 0 then
-            prompt:InputHoldBegin()
-            task.wait(prompt.HoldDuration + 0.05)
-            prompt:InputHoldEnd()
-        else
-            prompt:InputHoldBegin()
-            task.wait(0.1)
-            prompt:InputHoldEnd()
-        end
-    end)
-    return success
-end
-
-local function dropEgg()
-    local char, _, _ = getCharacter()
-    if not char then return end
-    local tool = char:FindFirstChildOfClass("Tool")
-    if tool then
-        local backpack = LP:FindFirstChild("Backpack")
-        if backpack then
-            tool.Parent = backpack
-        end
-    end
-end
-
--- ========== ANTI SYSTEMS ==========
-local antiRagdollConnection = nil
-
-local function enableAntiRagdoll()
-    if antiRagdollConnection then return end
-    antiRagdollConnection = LP.CharacterAdded:Connect(function(char)
-        local hum = char:WaitForChild("Humanoid")
-        hum.StateChanged:Connect(function(old, new)
-            if new == Enum.HumanoidStateType.Ragdoll then
-                hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
-                hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
-            end
-        end)
-    end)
-    
-    local char = LP.Character
-    if char then
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then
-            hum.StateChanged:Connect(function(old, new)
-                if new == Enum.HumanoidStateType.Ragdoll then
-                    hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
-                    hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
-                end
-            end)
-        end
-    end
-end
-
-local function checkThreats()
-    local _, hrp, _ = getCharacter()
-    if not hrp then return false end
-    
-    for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LP then
-            local char = player.Character
-            if char then
-                local enemyHrp = char:FindFirstChild("HumanoidRootPart")
-                if enemyHrp then
-                    local dist = (enemyHrp.Position - hrp.Position).Magnitude
-                    if dist < 30 then
-                        return true
-                    end
-                end
-            end
-        end
-    end
-    
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and (obj.Name:lower():find("trap") or obj.Name:lower():find("bear")) then
-            local dist = (obj.Position - hrp.Position).Magnitude
-            if dist < 20 then
-                return true
-            end
-        end
-    end
-    
-    return false
-end
-
-local function escapeThreat()
-    local _, hrp, _ = getCharacter()
-    if not hrp then return end
-    local escapePos = hrp.Position + Vector3.new(0, 150, 0)
-    tweenTo(escapePos, function()
-        task.wait(1)
-    end)
-end
-
--- ========== EGG EXECUTION ==========
-local function executeEgg(eggData)
-    if not eggData or not autoEnabled then return end
-    
-    isExecuting = true
-    
-    local _, hrp, _ = getCharacter()
-    if not hrp then 
-        isExecuting = false
-        return 
-    end
-    
-    if checkThreats() then
-        escapeThreat()
-        while flying do task.wait(0.1) end
-    end
-    
-    local eggPos = eggData.part.Position + Vector3.new(0, 5, 0)
-    tweenTo(eggPos, function()
-        task.wait(0.2)
-        
-        if checkThreats() then
-            escapeThreat()
-            while flying do task.wait(0.1) end
-        end
-        
-        pickUpEgg(eggData)
-        task.wait(0.5)
-    end)
-    
-    while flying do task.wait(0.05) end
-    task.wait(0.3)
-    
-    if checkThreats() then
-        escapeThreat()
-        while flying do task.wait(0.1) end
-    end
-    
-    if dropPoint then
-        tweenTo(dropPoint, function()
-            task.wait(0.2)
-        end)
-        
-        while flying do task.wait(0.05) end
-        task.wait(0.3)
-        
-        dropEgg()
-        task.wait(0.3)
-    end
-    
-    isExecuting = false
-end
-
-local function processNotification(biomeName)
-    if not autoEnabled or isExecuting then return end
-    
-    task.spawn(function()
-        local biomePos = findBiomePosition(biomeName)
-        if not biomePos then return end
-        
-        local eggs = findEggsInArea(biomePos, 500)
-        if #eggs == 0 then return end
-        
-        for _, egg in pairs(eggs) do
-            if not autoEnabled then break end
-            if not egg.prompt or not egg.prompt.Parent then
-                egg = eggs[#eggs]
-                if egg and egg.prompt and egg.prompt.Parent then
-                    executeEgg(egg)
-                end
-                break
-            end
-            executeEgg(egg)
-        end
-    end)
-end
-
-local function startMonitoring()
-    if monitorConnection then return end
-    
-    monitorConnection = LogService.MessageOut:Connect(function(message, messageType)
-        if not autoEnabled then return end
-        
-        local lowerMsg = message:lower()
-        
-        local hasRarity = lowerMsg:find("secret") or lowerMsg:find("eternal") or lowerMsg:find("divine")
-        if not hasRarity then return end
-        
-        local hasSpawn = lowerMsg:find("spawned") or lowerMsg:find("spawn")
-        if not hasSpawn then return end
-        
-        for _, biome in pairs(biomes) do
-            if lowerMsg:find(biome:lower()) then
-                processNotification(biome)
-                break
-            end
-        end
-    end)
-end
-
-local function stopMonitoring()
-    if monitorConnection then
-        monitorConnection:Disconnect()
-        monitorConnection = nil
-    end
-end
-
-local function fallbackLoop()
-    while autoEnabled do
-        if not isExecuting then
-            local eggs = scanAllEggs()
-            if #eggs > 0 then
-                for i, egg in pairs(eggs) do
-                    if not autoEnabled then break end
-                    if egg.prompt and egg.prompt.Parent then
-                        executeEgg(egg)
-                    else
-                        egg = eggs[#eggs]
-                        if egg and egg.prompt and egg.prompt.Parent then
-                            executeEgg(egg)
-                        end
-                        break
-                    end
-                end
-            end
-        end
-        task.wait(1)
-    end
-end
-
--- ========== BUTTONS ==========
 toggleBtn.MouseButton1Click:Connect(function()
-    autoEnabled = not autoEnabled
-    
-    if autoEnabled then
-        toggleBtn.Text = "Auto Drop Egg: ON"
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 140, 0)
-        enableAntiRagdoll()
-        startMonitoring()
-        task.spawn(fallbackLoop)
+    enabled = not enabled
+
+    if enabled then
+        toggleBtn.Text = "System: ON"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(30, 115, 70)
     else
-        toggleBtn.Text = "Auto Drop Egg: OFF"
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-        stopFlying()
-        stopMonitoring()
+        toggleBtn.Text = "System: OFF"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(38, 38, 45)
     end
 end)
 
-setDropBtn.MouseButton1Click:Connect(function()
-    local _, hrp, _ = getCharacter()
-    if hrp then
-        dropPoint = hrp.Position
-        setDropBtn.Text = "Drop Point Set!"
-        setDropBtn.BackgroundColor3 = Color3.fromRGB(0, 140, 0)
-        task.wait(1)
-        setDropBtn.Text = "Set Drop Point"
-        setDropBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+-- =========================================================
+-- DROP POINT
+-- =========================================================
+
+dropBtn.MouseButton1Click:Connect(function()
+    local _, hrp = getCharacter()
+
+    if not hrp then
+        return
+    end
+
+    dropPoint = hrp.CFrame
+
+    dropBtn.Text = "Drop Point: Set"
+    dropBtn.BackgroundColor3 = Color3.fromRGB(30, 115, 70)
+
+    task.delay(1.2, function()
+        if dropBtn and dropBtn.Parent then
+            dropBtn.Text = "Set Drop Point"
+            dropBtn.BackgroundColor3 = Color3.fromRGB(38, 38, 45)
+        end
+    end)
+end)
+
+-- =========================================================
+-- SPEED
+-- =========================================================
+
+local function updateSpeed()
+    speedLabel.Text = "Speed: " .. tostring(flySpeed)
+end
+
+minusBtn.MouseButton1Click:Connect(function()
+    flySpeed = math.max(50, flySpeed - 50)
+    updateSpeed()
+end)
+
+plusBtn.MouseButton1Click:Connect(function()
+    flySpeed = math.min(1000, flySpeed + 50)
+    updateSpeed()
+end)
+
+-- =========================================================
+-- DRAG MAIN BUTTON
+-- =========================================================
+
+local dragging = false
+local dragStart
+local startPosition
+
+mainBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+
+        dragging = true
+        dragStart = input.Position
+        startPosition = mainBtn.Position
     end
 end)
 
-speedSlider.MouseButton1Click:Connect(function()
-    local _, hrp, _ = getCharacter()
-    if not hrp then return end
-    
-    local mouse = UserInputService:GetMouseLocation()
-    local viewportSize = workspace.CurrentCamera.ViewportSize
-    
-    if mouse.X < viewportSize.X / 2 then
-        flySpeed = math.max(100, flySpeed - 50)
-    else
-        flySpeed = math.min(1000, flySpeed + 50)
+UserInputService.InputChanged:Connect(function(input)
+    if not dragging then
+        return
     end
-    
-    speedLabel.Text = "Speed: " .. flySpeed
+
+    if input.UserInputType ~= Enum.UserInputType.MouseMovement
+        and input.UserInputType ~= Enum.UserInputType.Touch then
+        return
+    end
+
+    local delta = input.Position - dragStart
+
+    mainBtn.Position = UDim2.new(
+        startPosition.X.Scale,
+        startPosition.X.Offset + delta.X,
+        startPosition.Y.Scale,
+        startPosition.Y.Offset + delta.Y
+    )
 end)
 
-LP.CharacterAdded:Connect(function()
-    if autoEnabled then
-        stopFlying()
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+
+        dragging = false
     end
 end)
 
-print("LampuHub loaded - Auto Drop Egg ready")
+-- =========================================================
+-- CHARACTER RESPAWN
+-- =========================================================
+
+table.insert(
+    connections,
+    LP.CharacterAdded:Connect(function(character)
+        dropPoint = nil
+        setupCharacter(character)
+    end)
+)
+
+if LP.Character then
+    setupCharacter(LP.Character)
+end
+
+-- =========================================================
+-- INITIAL STATE
+-- =========================================================
+
+updateSpeed()
+
+print("LampuHub loaded successfully.")
