@@ -1,4 +1,4 @@
--- LOW POP SERVER HOPPER + FLOATING GUI
+-- LOW POP SERVER HOPPER + FLOATING GUI + MANUAL TELEPORT
 -- Universal — auto baca PlaceId
 
 local Players = game:GetService("Players")
@@ -11,11 +11,11 @@ local LocalPlayer = Players.LocalPlayer
 -- ============ CONFIG ============
 local MIN_PLAYERS = 1
 local MAX_PLAYERS = 3
-local MAX_ATTEMPTS = 100
+local MAX_ATTEMPTS = 40
 local RETRY_DELAY = 2
 -- =================================
 
--- HAPUS GUI LAMA KALAU ADA
+-- HAPUS GUI LAMA
 if CoreGui:FindFirstChild("HopGui") then
     CoreGui.HopGui:Destroy()
 end
@@ -29,7 +29,7 @@ ScreenGui.Parent = CoreGui
 
 local Main = Instance.new("Frame")
 Main.Name = "Main"
-Main.Size = UDim2.new(0, 240, 0, 200)
+Main.Size = UDim2.new(0, 260, 0, 260)
 Main.Position = UDim2.new(0, 20, 0, 100)
 Main.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
 Main.BorderSizePixel = 0
@@ -69,7 +69,6 @@ Title.TextSize = 14
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Parent = Header
 
--- TOMBOL MINIMIZE
 local MinBtn = Instance.new("TextButton")
 MinBtn.Size = UDim2.new(0, 24, 0, 24)
 MinBtn.Position = UDim2.new(1, -30, 0, 4)
@@ -85,10 +84,10 @@ local MinCorner = Instance.new("UICorner")
 MinCorner.CornerRadius = UDim.new(0, 6)
 MinCorner.Parent = MinBtn
 
--- STATUS TEXT
+-- STATUS
 local Status = Instance.new("TextLabel")
 Status.Name = "Status"
-Status.Size = UDim2.new(1, -20, 0, 40)
+Status.Size = UDim2.new(1, -20, 0, 44)
 Status.Position = UDim2.new(0, 10, 0, 40)
 Status.BackgroundTransparency = 1
 Status.Text = "Status: Idle"
@@ -100,11 +99,11 @@ Status.TextXAlignment = Enum.TextXAlignment.Left
 Status.TextYAlignment = Enum.TextYAlignment.Top
 Status.Parent = Main
 
--- INFO SERVER
+-- INFO
 local Info = Instance.new("TextLabel")
 Info.Name = "Info"
 Info.Size = UDim2.new(1, -20, 0, 50)
-Info.Position = UDim2.new(0, 10, 0, 82)
+Info.Position = UDim2.new(0, 10, 0, 88)
 Info.BackgroundTransparency = 1
 Info.Text = "Server: -\nPlayer: -/-"
 Info.TextColor3 = Color3.fromRGB(150, 220, 255)
@@ -114,6 +113,23 @@ Info.TextWrapped = true
 Info.TextXAlignment = Enum.TextXAlignment.Left
 Info.TextYAlignment = Enum.TextYAlignment.Top
 Info.Parent = Main
+
+-- TOMBOL TELEPORT MANUAL
+local TpBtn = Instance.new("TextButton")
+TpBtn.Name = "TpBtn"
+TpBtn.Size = UDim2.new(1, -20, 0, 34)
+TpBtn.Position = UDim2.new(0, 10, 0, 146)
+TpBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+TpBtn.Text = "📡 TELEPORT KE SERVER INI"
+TpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+TpBtn.Font = Enum.Font.GothamBold
+TpBtn.TextSize = 11
+TpBtn.BorderSizePixel = 0
+TpBtn.Parent = Main
+
+local TpCorner = Instance.new("UICorner")
+TpCorner.CornerRadius = UDim.new(0, 8)
+TpCorner.Parent = TpBtn
 
 -- TOMBOL START
 local StartBtn = Instance.new("TextButton")
@@ -149,20 +165,25 @@ local StopCorner = Instance.new("UICorner")
 StopCorner.CornerRadius = UDim.new(0, 8)
 StopCorner.Parent = StopBtn
 
--- MINIMIZE LOGIC
+-- MINIMIZE
 local minimized = false
+local fullHeight = 260
 MinBtn.MouseButton1Click:Connect(function()
     minimized = not minimized
     if minimized then
-        Main.Size = UDim2.new(0, 240, 0, 32)
+        Main.Size = UDim2.new(0, 260, 0, 32)
         MinBtn.Text = "+"
     else
-        Main.Size = UDim2.new(0, 240, 0, 200)
+        Main.Size = UDim2.new(0, 260, 0, fullHeight)
         MinBtn.Text = "–"
     end
 end)
 
--- ============ HELPER UPDATE ============
+-- ============ STATE ============
+local running = false
+local lastFound = nil -- nyimpen server terakhir yg ketemu
+
+-- ============ HELPER ============
 local function setStatus(text, color)
     Status.Text = "Status: " .. text
     Status.TextColor3 = color or Color3.fromRGB(200, 200, 200)
@@ -176,9 +197,17 @@ local function setInfo(jobId, playing, maxPlayers)
     end
 end
 
--- ============ CORE FUNCTIONS ============
-local running = false
+local function enableTpButton(enable)
+    if enable then
+        TpBtn.BackgroundColor3 = Color3.fromRGB(80, 130, 220)
+        TpBtn.Text = "📡 TELEPORT KE SERVER INI"
+    else
+        TpBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+        TpBtn.Text = "📡 TELEPORT KE SERVER INI"
+    end
+end
 
+-- ============ CORE ============
 local function fetchServers(placeId)
     local url = string.format(
         "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100",
@@ -216,6 +245,13 @@ local function sortServers(servers)
 end
 
 local function hopToServer(jobId)
+    if not jobId then
+        setStatus("Belum ada server target!", Color3.fromRGB(255, 120, 120))
+        return false
+    end
+
+    setStatus("Teleporting...", Color3.fromRGB(255, 220, 100))
+
     local opts = Instance.new("TeleportOptions")
     opts.ServerInstanceId = jobId
     opts.ShouldReserveServer = false
@@ -226,16 +262,19 @@ local function hopToServer(jobId)
 
     if not ok then
         warn("[Hop] Teleport gagal: " .. tostring(err))
+        setStatus("Teleport gagal! Coba lagi.", Color3.fromRGB(255, 120, 120))
         return false
     end
     return true
 end
 
--- ============ MAIN LOOP ============
+-- ============ MAIN SCAN ============
 local function main()
     running = true
+    lastFound = nil
+    enableTpButton(false)
     StartBtn.BackgroundColor3 = Color3.fromRGB(30, 100, 60)
-    setStatus("Mencari server 1-3 player...", Color3.fromRGB(255, 220, 100))
+    setStatus("Scanning server 1-3 player...", Color3.fromRGB(255, 220, 100))
 
     local attempt = 0
     while running and attempt < MAX_ATTEMPTS do
@@ -247,13 +286,13 @@ local function main()
 
         if #candidates > 0 then
             local target = candidates[1]
+            lastFound = target
             setInfo(target.id, target.playing, target.maxPlayers)
-            setStatus(string.format("Ketemu! Teleport ke %d player...", target.playing), Color3.fromRGB(100, 255, 150))
-
-            if hopToServer(target.id) then
-                setStatus("Teleport sukses!", Color3.fromRGB(100, 255, 150))
-                return
-            end
+            setStatus(string.format("Ketemu! %d player. Klik TELEPORT!", target.playing), Color3.fromRGB(100, 255, 150))
+            enableTpButton(true)
+            StartBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 90)
+            running = false
+            return
         else
             setStatus(string.format("Attempt #%d — belum ada, retry...", attempt), Color3.fromRGB(255, 180, 100))
         end
@@ -264,7 +303,9 @@ local function main()
     if running then
         setStatus("Gagal nemu server. Naikin MAX_PLAYERS.", Color3.fromRGB(255, 120, 120))
     else
-        setStatus("Dihentikan user.", Color3.fromRGB(180, 180, 180))
+        if not lastFound then
+            setStatus("Dihentikan user.", Color3.fromRGB(180, 180, 180))
+        end
     end
     StartBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 90)
     running = false
@@ -280,6 +321,14 @@ StopBtn.MouseButton1Click:Connect(function()
     running = false
     setStatus("Dihentikan user.", Color3.fromRGB(180, 180, 180))
     StartBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 90)
+end)
+
+TpBtn.MouseButton1Click:Connect(function()
+    if lastFound and lastFound.id then
+        hopToServer(lastFound.id)
+    else
+        setStatus("Belum ada server target. Klik START dulu.", Color3.fromRGB(255, 120, 120))
+    end
 end)
 
 setStatus("Idle — pencet START", Color3.fromRGB(200, 200, 200))
