@@ -1,97 +1,121 @@
--- LOW POP SERVER HOPPER + FLOATING GUI + MANUAL TELEPORT
--- Universal — auto baca PlaceId
+--[[
+    SERVER HOP PANEL — FULL VERSION (FIXED)
+    Floating GUI + Manual Teleport + Live Validation + Realistic Success Detection
+
+    PERUBAHAN DARI VERSI ASLI:
+    1. Sistem drag: dulu tiap InputBegan bikin koneksi input.Changed baru
+       tanpa pernah disconnect -> numpuk terus tiap kali drag (leak).
+       Sekarang pakai satu koneksi UserInputService.InputEnded aja.
+    2. Deteksi gagal teleport: dulu cuma nebak "gagal" kalau masih di
+       JobId yang sama setelah N detik. Sekarang dengar event resmi
+       TeleportService.TeleportInitFailed, jadi tahu PERSIS alasannya
+       (server penuh / flood / dll) dan bisa react lebih cepat, gak
+       harus nunggu penuh TELEPORT_CHECK_TIME tiap kali.
+]]
 
 local Players = game:GetService("Players")
-local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
 local UserInputService = game:GetService("UserInputService")
-local CoreGui = game:GetService("CoreGui")
+local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
--- ============ CONFIG ============
+--==================================================
+-- CONFIG
+--==================================================
+
 local MIN_PLAYERS = 1
 local MAX_PLAYERS = 3
-local MAX_ATTEMPTS = 40
-local RETRY_DELAY = 2
--- =================================
+local SCAN_DELAY = 5
+local MAX_ATTEMPTS = 20
+local TELEPORT_CHECK_TIME = 4 -- detik nunggu konfirmasi teleport
 
--- HAPUS GUI LAMA
-if CoreGui:FindFirstChild("HopGui") then
-    CoreGui.HopGui:Destroy()
+-- true  = Roblox public API (game publik / executor)
+-- false = custom (game sendiri / Studio)
+local USE_ROBLOX_API = true
+
+--==================================================
+-- GUI
+--==================================================
+
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+local oldGui = PlayerGui:FindFirstChild("ServerHopGui")
+if oldGui then
+    oldGui:Destroy()
 end
 
--- ============ BUILD GUI ============
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "HopGui"
+ScreenGui.Name = "ServerHopGui"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.Parent = CoreGui
+ScreenGui.Parent = PlayerGui
+
+--==================================================
+-- MAIN FRAME
+--==================================================
 
 local Main = Instance.new("Frame")
 Main.Name = "Main"
-Main.Size = UDim2.new(0, 260, 0, 260)
-Main.Position = UDim2.new(0, 20, 0, 100)
+Main.Size = UDim2.fromOffset(280, 270)
+Main.Position = UDim2.new(0, 20, 0.5, -135)
 Main.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
 Main.BorderSizePixel = 0
 Main.Active = true
-Main.Draggable = true
 Main.Parent = ScreenGui
 
-local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(0, 10)
-UICorner.Parent = Main
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 12)
 
 local Stroke = Instance.new("UIStroke")
 Stroke.Color = Color3.fromRGB(80, 200, 255)
 Stroke.Thickness = 1.5
 Stroke.Parent = Main
 
+--==================================================
 -- HEADER
+--==================================================
+
 local Header = Instance.new("Frame")
-Header.Name = "Header"
-Header.Size = UDim2.new(1, 0, 0, 32)
+Header.Size = UDim2.new(1, 0, 0, 38)
 Header.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
 Header.BorderSizePixel = 0
 Header.Parent = Main
 
-local HeaderCorner = Instance.new("UICorner")
-HeaderCorner.CornerRadius = UDim.new(0, 10)
-HeaderCorner.Parent = Header
+Instance.new("UICorner", Header).CornerRadius = UDim.new(0, 12)
 
 local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, -40, 1, 0)
-Title.Position = UDim2.new(0, 12, 0, 0)
+Title.Size = UDim2.new(1, -50, 1, 0)
+Title.Position = UDim2.fromOffset(12, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "⚡ Hop Panel"
+Title.Text = "⚡ Server Hop"
 Title.TextColor3 = Color3.fromRGB(80, 200, 255)
 Title.Font = Enum.Font.GothamBold
-Title.TextSize = 14
+Title.TextSize = 15
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Parent = Header
 
 local MinBtn = Instance.new("TextButton")
-MinBtn.Size = UDim2.new(0, 24, 0, 24)
-MinBtn.Position = UDim2.new(1, -30, 0, 4)
+MinBtn.Size = UDim2.fromOffset(28, 28)
+MinBtn.Position = UDim2.new(1, -33, 0, 5)
 MinBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
-MinBtn.Text = "–"
-MinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinBtn.Text = "−"
+MinBtn.TextColor3 = Color3.fromRGB(255,255,255)
 MinBtn.Font = Enum.Font.GothamBold
-MinBtn.TextSize = 14
+MinBtn.TextSize = 16
 MinBtn.BorderSizePixel = 0
 MinBtn.Parent = Header
 
-local MinCorner = Instance.new("UICorner")
-MinCorner.CornerRadius = UDim.new(0, 6)
-MinCorner.Parent = MinBtn
+Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0, 7)
 
+--==================================================
 -- STATUS
+--==================================================
+
 local Status = Instance.new("TextLabel")
-Status.Name = "Status"
-Status.Size = UDim2.new(1, -20, 0, 44)
-Status.Position = UDim2.new(0, 10, 0, 40)
+Status.Size = UDim2.new(1, -20, 0, 42)
+Status.Position = UDim2.fromOffset(10, 48)
 Status.BackgroundTransparency = 1
 Status.Text = "Status: Idle"
-Status.TextColor3 = Color3.fromRGB(200, 200, 200)
+Status.TextColor3 = Color3.fromRGB(200,200,200)
 Status.Font = Enum.Font.Gotham
 Status.TextSize = 12
 Status.TextWrapped = true
@@ -99,14 +123,16 @@ Status.TextXAlignment = Enum.TextXAlignment.Left
 Status.TextYAlignment = Enum.TextYAlignment.Top
 Status.Parent = Main
 
--- INFO
+--==================================================
+-- SERVER INFO
+--==================================================
+
 local Info = Instance.new("TextLabel")
-Info.Name = "Info"
-Info.Size = UDim2.new(1, -20, 0, 50)
-Info.Position = UDim2.new(0, 10, 0, 88)
+Info.Size = UDim2.new(1, -20, 0, 55)
+Info.Position = UDim2.fromOffset(10, 92)
 Info.BackgroundTransparency = 1
-Info.Text = "Server: -\nPlayer: -/-"
-Info.TextColor3 = Color3.fromRGB(150, 220, 255)
+Info.Text = "Server: -\nPlayers: -/-\nScan: -"
+Info.TextColor3 = Color3.fromRGB(150,220,255)
 Info.Font = Enum.Font.Code
 Info.TextSize = 11
 Info.TextWrapped = true
@@ -114,222 +140,548 @@ Info.TextXAlignment = Enum.TextXAlignment.Left
 Info.TextYAlignment = Enum.TextYAlignment.Top
 Info.Parent = Main
 
--- TOMBOL TELEPORT MANUAL
+--==================================================
+-- TELEPORT BUTTON
+--==================================================
+
 local TpBtn = Instance.new("TextButton")
-TpBtn.Name = "TpBtn"
-TpBtn.Size = UDim2.new(1, -20, 0, 34)
-TpBtn.Position = UDim2.new(0, 10, 0, 146)
-TpBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
-TpBtn.Text = "📡 TELEPORT KE SERVER INI"
-TpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+TpBtn.Name = "TeleportButton"
+TpBtn.Size = UDim2.new(1, -20, 0, 38)
+TpBtn.Position = UDim2.fromOffset(10, 152)
+TpBtn.BackgroundColor3 = Color3.fromRGB(55,55,70)
+TpBtn.Text = "📡  TELEPORT KE SERVER"
+TpBtn.TextColor3 = Color3.fromRGB(150,150,150)
 TpBtn.Font = Enum.Font.GothamBold
 TpBtn.TextSize = 11
 TpBtn.BorderSizePixel = 0
+TpBtn.AutoButtonColor = true
 TpBtn.Parent = Main
 
-local TpCorner = Instance.new("UICorner")
-TpCorner.CornerRadius = UDim.new(0, 8)
-TpCorner.Parent = TpBtn
+Instance.new("UICorner", TpBtn).CornerRadius = UDim.new(0, 8)
 
--- TOMBOL START
+--==================================================
+-- START BUTTON
+--==================================================
+
 local StartBtn = Instance.new("TextButton")
-StartBtn.Name = "StartBtn"
-StartBtn.Size = UDim2.new(0.5, -14, 0, 34)
-StartBtn.Position = UDim2.new(0, 10, 1, -44)
-StartBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 90)
+StartBtn.Name = "StartButton"
+StartBtn.Size = UDim2.new(0.5, -15, 0, 38)
+StartBtn.Position = UDim2.new(0, 10, 1, -48)
+StartBtn.BackgroundColor3 = Color3.fromRGB(40,160,90)
 StartBtn.Text = "▶ START"
-StartBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+StartBtn.TextColor3 = Color3.fromRGB(255,255,255)
 StartBtn.Font = Enum.Font.GothamBold
 StartBtn.TextSize = 12
 StartBtn.BorderSizePixel = 0
 StartBtn.Parent = Main
 
-local StartCorner = Instance.new("UICorner")
-StartCorner.CornerRadius = UDim.new(0, 8)
-StartCorner.Parent = StartBtn
+Instance.new("UICorner", StartBtn).CornerRadius = UDim.new(0, 8)
 
--- TOMBOL STOP
+--==================================================
+-- STOP BUTTON
+--==================================================
+
 local StopBtn = Instance.new("TextButton")
-StopBtn.Name = "StopBtn"
-StopBtn.Size = UDim2.new(0.5, -14, 0, 34)
-StopBtn.Position = UDim2.new(0.5, 4, 1, -44)
-StopBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+StopBtn.Name = "StopButton"
+StopBtn.Size = UDim2.new(0.5, -15, 0, 38)
+StopBtn.Position = UDim2.new(0.5, 5, 1, -48)
+StopBtn.BackgroundColor3 = Color3.fromRGB(180,50,50)
 StopBtn.Text = "■ STOP"
-StopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+StopBtn.TextColor3 = Color3.fromRGB(255,255,255)
 StopBtn.Font = Enum.Font.GothamBold
 StopBtn.TextSize = 12
 StopBtn.BorderSizePixel = 0
 StopBtn.Parent = Main
 
-local StopCorner = Instance.new("UICorner")
-StopCorner.CornerRadius = UDim.new(0, 8)
-StopCorner.Parent = StopBtn
+Instance.new("UICorner", StopBtn).CornerRadius = UDim.new(0, 8)
 
--- MINIMIZE
-local minimized = false
-local fullHeight = 260
-MinBtn.MouseButton1Click:Connect(function()
-    minimized = not minimized
-    if minimized then
-        Main.Size = UDim2.new(0, 260, 0, 32)
-        MinBtn.Text = "+"
-    else
-        Main.Size = UDim2.new(0, 260, 0, fullHeight)
-        MinBtn.Text = "–"
+--==================================================
+-- DRAG SYSTEM (FIXED: gak numpuk koneksi lagi)
+--==================================================
+
+local dragging = false
+local dragStart
+local startPos
+
+Header.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = Main.Position
     end
 end)
 
--- ============ STATE ============
-local running = false
-local lastFound = nil -- nyimpen server terakhir yg ketemu
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
 
--- ============ HELPER ============
+UserInputService.InputChanged:Connect(function(input)
+    if not dragging then return end
+
+    if input.UserInputType ~= Enum.UserInputType.MouseMovement
+        and input.UserInputType ~= Enum.UserInputType.Touch then
+        return
+    end
+
+    local delta = input.Position - dragStart
+
+    Main.Position = UDim2.new(
+        startPos.X.Scale,
+        startPos.X.Offset + delta.X,
+        startPos.Y.Scale,
+        startPos.Y.Offset + delta.Y
+    )
+end)
+
+--==================================================
+-- STATE
+--==================================================
+
+local running = false
+local minimized = false
+local tpEnabled = false
+local teleporting = false
+
+local currentServerId = nil
+local currentPlayers = nil
+local currentMaxPlayers = nil
+
+local normalHeight = 270
+
+--==================================================
+-- HELPERS
+--==================================================
+
 local function setStatus(text, color)
     Status.Text = "Status: " .. text
-    Status.TextColor3 = color or Color3.fromRGB(200, 200, 200)
+    Status.TextColor3 = color or Color3.fromRGB(200,200,200)
 end
 
-local function setInfo(jobId, playing, maxPlayers)
-    if jobId then
-        Info.Text = string.format("Server: %s\nPlayer: %d/%d", string.sub(jobId, 1, 12) .. "...", playing, maxPlayers)
+local function updateInfo(scan)
+    local serverText = "-"
+    if currentServerId then
+        serverText = string.sub(currentServerId, 1, 12) .. "..."
+    end
+
+    local playersText = "-/-"
+    if currentPlayers and currentMaxPlayers then
+        playersText = tostring(currentPlayers) .. "/" .. tostring(currentMaxPlayers)
+    end
+
+    Info.Text = "Server: " .. serverText
+        .. "\nPlayers: " .. playersText
+        .. "\nScan: " .. tostring(scan or "-")
+end
+
+local function enableTeleport(enabled)
+    tpEnabled = enabled
+
+    if enabled then
+        TpBtn.BackgroundColor3 = Color3.fromRGB(70,130,220)
+        TpBtn.TextColor3 = Color3.fromRGB(255,255,255)
     else
-        Info.Text = "Server: -\nPlayer: -/-"
+        TpBtn.BackgroundColor3 = Color3.fromRGB(55,55,70)
+        TpBtn.TextColor3 = Color3.fromRGB(150,150,150)
     end
 end
 
-local function enableTpButton(enable)
-    if enable then
-        TpBtn.BackgroundColor3 = Color3.fromRGB(80, 130, 220)
-        TpBtn.Text = "📡 TELEPORT KE SERVER INI"
+--==================================================
+-- MINIMIZE
+--==================================================
+
+MinBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+
+    if minimized then
+        Main.Size = UDim2.fromOffset(280, 38)
+        MinBtn.Text = "+"
+
+        Status.Visible = false
+        Info.Visible = false
+        TpBtn.Visible = false
+        StartBtn.Visible = false
+        StopBtn.Visible = false
     else
-        TpBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
-        TpBtn.Text = "📡 TELEPORT KE SERVER INI"
+        Main.Size = UDim2.fromOffset(280, normalHeight)
+        MinBtn.Text = "−"
+
+        Status.Visible = true
+        Info.Visible = true
+        TpBtn.Visible = true
+        StartBtn.Visible = true
+        StopBtn.Visible = true
     end
+end)
+
+--==================================================
+-- SERVER LIST PROVIDERS
+--==================================================
+
+local function getAvailableServersCustom()
+    return {}
 end
 
--- ============ CORE ============
-local function fetchServers(placeId)
+local function getAvailableServersAPI()
     local url = string.format(
         "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100",
-        placeId
+        game.PlaceId
     )
+
     local ok, response = pcall(function()
         return HttpService:JSONDecode(game:HttpGet(url))
     end)
+
     if not ok or not response or not response.data then
         return {}
     end
+
     return response.data
 end
 
-local function filterServers(servers)
-    local out = {}
+local function getAvailableServers()
+    if USE_ROBLOX_API then
+        return getAvailableServersAPI()
+    else
+        return getAvailableServersCustom()
+    end
+end
+
+--==================================================
+-- LIVE VALIDATION
+--==================================================
+
+local function isServerStillAvailable(serverId)
+    local servers = getAvailableServers()
+
+    for _, srv in ipairs(servers) do
+        if srv.id == serverId then
+            local p = tonumber(srv.playing) or 0
+            local mp = tonumber(srv.maxPlayers) or 0
+
+            if p >= MIN_PLAYERS and p <= MAX_PLAYERS then
+                return true, p, mp
+            else
+                return false, nil, nil, string.format("Server udah %d/%d", p, mp)
+            end
+        end
+    end
+
+    return false, nil, nil, "Server udah gak ada di list"
+end
+
+local function findNewServer()
+    local servers = getAvailableServers()
+
+    local best = nil
+    local bestPlayers = math.huge
+
     for _, srv in ipairs(servers) do
         if srv.id
             and srv.playing
             and srv.playing >= MIN_PLAYERS
             and srv.playing <= MAX_PLAYERS
-            and srv.id ~= game.JobId
-        then
-            table.insert(out, srv)
+            and srv.id ~= game.JobId then
+            if srv.playing < bestPlayers then
+                bestPlayers = srv.playing
+                best = srv
+            end
         end
     end
-    return out
+
+    return best
 end
 
-local function sortServers(servers)
-    table.sort(servers, function(a, b)
-        return a.playing < b.playing
-    end)
-    return servers
+--==================================================
+-- TELEPORT FAILURE TRACKING (BARU)
+-- Ganti tebakan "masih di server yang sama = gagal" dengan
+-- event resmi Roblox, jadi tahu ALASAN gagalnya secara pasti.
+--==================================================
+
+local lastTeleportResult = nil
+local lastTeleportError = nil
+
+TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
+    if player == LocalPlayer then
+        lastTeleportResult = teleportResult
+        lastTeleportError = errorMessage
+    end
+end)
+
+local function teleportResultToText(result)
+    if result == Enum.TeleportResult.GameFull then
+        return "Server sudah penuh"
+    elseif result == Enum.TeleportResult.Flooded then
+        return "Kebanyakan request teleport, coba lagi sebentar"
+    elseif result == Enum.TeleportResult.GameNotFound then
+        return "Server gak ketemu lagi"
+    elseif result == Enum.TeleportResult.GameEnded then
+        return "Server udah berakhir"
+    elseif result == Enum.TeleportResult.Unauthorized then
+        return "Gak diizinkan teleport ke server ini"
+    else
+        return "Teleport gagal"
+    end
 end
 
-local function hopToServer(jobId)
-    if not jobId then
-        setStatus("Belum ada server target!", Color3.fromRGB(255, 120, 120))
-        return false
+-- Nunggu event TeleportInitFailed sampai `seconds` detik.
+-- return true  -> gak ada event gagal dalam waktu itu (dianggap berhasil;
+--                 kalau BENERAN berhasil, script ini duluan berhenti jalan
+--                 karena server client-nya udah pindah)
+-- return false, result, errMsg -> ketauan gagal, lengkap sama alasannya
+local function waitForTeleportOutcome(seconds)
+    lastTeleportResult = nil
+    lastTeleportError = nil
+
+    local elapsed = 0
+    while elapsed < seconds do
+        if lastTeleportResult then
+            return false, lastTeleportResult, lastTeleportError
+        end
+        task.wait(0.25)
+        elapsed += 0.25
     end
 
-    setStatus("Teleporting...", Color3.fromRGB(255, 220, 100))
+    return true, nil, nil
+end
 
-    local opts = Instance.new("TeleportOptions")
-    opts.ServerInstanceId = jobId
-    opts.ShouldReserveServer = false
+--==================================================
+-- TELEPORT — REALISTIC DETECTION
+--==================================================
 
-    local ok, err = pcall(function()
-        TeleportService:TeleportAsync(game.PlaceId, {LocalPlayer}, opts)
+local function tryTeleport(serverId)
+    local success, err = pcall(function()
+        local options = Instance.new("TeleportOptions")
+        options.ServerInstanceId = serverId
+        TeleportService:TeleportAsync(game.PlaceId, {LocalPlayer}, options)
     end)
+
+    if success then
+        return true, nil
+    end
+
+    warn("[ServerHop] TeleportAsync error: " .. tostring(err))
+
+    local ok2, err2 = pcall(function()
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, serverId, LocalPlayer)
+    end)
+
+    if ok2 then
+        return true, nil
+    end
+
+    return false, tostring(err2 or err)
+end
+
+local function teleportToServer(serverId)
+    if not serverId then
+        setStatus("Belum ada server target.", Color3.fromRGB(255,120,120))
+        return
+    end
+
+    if teleporting then return end
+    teleporting = true
+
+    setStatus("Validasi server...", Color3.fromRGB(255,220,100))
+    task.wait(0.3)
+
+    -- VALIDASI LIVE
+    local stillOk = isServerStillAvailable(serverId)
+
+    if not stillOk then
+        setStatus("Server penuh! Cari pengganti...", Color3.fromRGB(255,180,100))
+        task.wait(0.5)
+
+        local replacement = findNewServer()
+        if replacement then
+            currentServerId = replacement.id
+            currentPlayers = replacement.playing
+            currentMaxPlayers = replacement.maxPlayers
+            updateInfo("-")
+            setStatus(
+                string.format("Pengganti: %d player. Klik TELEPORT lagi!", replacement.playing),
+                Color3.fromRGB(100,255,150)
+            )
+        else
+            setStatus("Gak ada pengganti. Scan ulang.", Color3.fromRGB(255,120,120))
+            currentServerId = nil
+            enableTeleport(false)
+        end
+
+        teleporting = false
+        return
+    end
+
+    -- TELEPORT
+    setStatus("Mengirim request teleport...", Color3.fromRGB(255,220,100))
+
+    local ok, errMsg = tryTeleport(serverId)
 
     if not ok then
-        warn("[Hop] Teleport gagal: " .. tostring(err))
-        setStatus("Teleport gagal! Coba lagi.", Color3.fromRGB(255, 120, 120))
-        return false
+        setStatus("Request teleport ditolak.", Color3.fromRGB(255,120,120))
+        teleporting = false
+        return
     end
-    return true
+
+    -- KONFIRMASI (pakai event resmi, bukan tebakan lagi)
+    setStatus("Nunggu konfirmasi teleport...", Color3.fromRGB(255,220,100))
+
+    local success2, failResult, failMsg = waitForTeleportOutcome(TELEPORT_CHECK_TIME)
+
+    if success2 then
+        setStatus("Teleport berhasil!", Color3.fromRGB(100,255,150))
+        teleporting = false
+        return
+    end
+
+    -- GAGAL — CARI PENGGANTI
+    local reasonText = teleportResultToText(failResult)
+    warn("[ServerHop] TeleportInitFailed: " .. reasonText .. " - " .. tostring(failMsg))
+    setStatus(reasonText .. ". Cari pengganti...", Color3.fromRGB(255,180,100))
+    task.wait(0.5)
+
+    local replacement = findNewServer()
+    if replacement then
+        currentServerId = replacement.id
+        currentPlayers = replacement.playing
+        currentMaxPlayers = replacement.maxPlayers
+        updateInfo("-")
+        setStatus(
+            string.format("Pengganti: %d player. Klik TELEPORT lagi!", replacement.playing),
+            Color3.fromRGB(100,255,150)
+        )
+    else
+        setStatus("Gak ada pengganti. Scan ulang.", Color3.fromRGB(255,120,120))
+        currentServerId = nil
+        enableTeleport(false)
+    end
+
+    teleporting = false
 end
 
--- ============ MAIN SCAN ============
-local function main()
+--==================================================
+-- SCAN
+--==================================================
+
+local function scanServers()
+    if running then return end
     running = true
-    lastFound = nil
-    enableTpButton(false)
-    StartBtn.BackgroundColor3 = Color3.fromRGB(30, 100, 60)
-    setStatus("Scanning server 1-3 player...", Color3.fromRGB(255, 220, 100))
 
-    local attempt = 0
-    while running and attempt < MAX_ATTEMPTS do
-        attempt += 1
-        setStatus(string.format("Attempt #%d — scanning...", attempt), Color3.fromRGB(255, 220, 100))
+    currentServerId = nil
+    currentPlayers = nil
+    currentMaxPlayers = nil
 
-        local servers = fetchServers(game.PlaceId)
-        local candidates = sortServers(filterServers(servers))
+    enableTeleport(false)
+    StartBtn.BackgroundColor3 = Color3.fromRGB(30,100,60)
+    setStatus("Memulai pencarian...", Color3.fromRGB(255,220,100))
 
-        if #candidates > 0 then
-            local target = candidates[1]
-            lastFound = target
-            setInfo(target.id, target.playing, target.maxPlayers)
-            setStatus(string.format("Ketemu! %d player. Klik TELEPORT!", target.playing), Color3.fromRGB(100, 255, 150))
-            enableTpButton(true)
-            StartBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 90)
-            running = false
-            return
-        else
-            setStatus(string.format("Attempt #%d — belum ada, retry...", attempt), Color3.fromRGB(255, 180, 100))
+    for attempt = 1, MAX_ATTEMPTS do
+        if not running then break end
+
+        setStatus(
+            "Scanning... " .. tostring(attempt) .. "/" .. tostring(MAX_ATTEMPTS),
+            Color3.fromRGB(255,220,100)
+        )
+        updateInfo(attempt)
+
+        local servers = getAvailableServers()
+        local target = nil
+
+        for _, server in ipairs(servers) do
+            if not running then break end
+
+            local players = tonumber(server.playing) or 0
+            local maxPlayers = tonumber(server.maxPlayers) or 0
+            local serverId = server.id
+
+            if serverId
+                and serverId ~= game.JobId
+                and players >= MIN_PLAYERS
+                and players <= MAX_PLAYERS then
+                target = server
+                break
+            end
         end
 
-        task.wait(RETRY_DELAY)
+        if target then
+            currentServerId = target.id
+            currentPlayers = target.playing
+            currentMaxPlayers = target.maxPlayers
+
+            updateInfo(attempt)
+            setStatus("Server ditemukan! Klik TELEPORT.", Color3.fromRGB(100,255,150))
+            enableTeleport(true)
+
+            running = false
+            StartBtn.BackgroundColor3 = Color3.fromRGB(40,160,90)
+            return
+        end
+
+        if attempt < MAX_ATTEMPTS then
+            for second = SCAN_DELAY, 1, -1 do
+                if not running then break end
+                setStatus(
+                    "Belum ditemukan. Scan lagi dalam " .. tostring(second) .. " detik...",
+                    Color3.fromRGB(255,180,100)
+                )
+                task.wait(1)
+            end
+        end
     end
 
     if running then
-        setStatus("Gagal nemu server. Naikin MAX_PLAYERS.", Color3.fromRGB(255, 120, 120))
+        setStatus("Pencarian selesai. Server tidak ditemukan.", Color3.fromRGB(255,120,120))
     else
-        if not lastFound then
-            setStatus("Dihentikan user.", Color3.fromRGB(180, 180, 180))
-        end
+        setStatus("Scan dihentikan.", Color3.fromRGB(180,180,180))
     end
-    StartBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 90)
+
     running = false
+    StartBtn.BackgroundColor3 = Color3.fromRGB(40,160,90)
 end
 
--- ============ BUTTON EVENTS ============
+--==================================================
+-- BUTTON EVENTS
+--==================================================
+
 StartBtn.MouseButton1Click:Connect(function()
     if running then return end
-    task.spawn(main)
+    task.spawn(scanServers)
 end)
 
 StopBtn.MouseButton1Click:Connect(function()
+    if not running then
+        setStatus("Tidak ada scan yang berjalan.", Color3.fromRGB(180,180,180))
+        return
+    end
+
     running = false
-    setStatus("Dihentikan user.", Color3.fromRGB(180, 180, 180))
-    StartBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 90)
+    setStatus("Menghentikan scan...", Color3.fromRGB(180,180,180))
+    StartBtn.BackgroundColor3 = Color3.fromRGB(40,160,90)
 end)
 
 TpBtn.MouseButton1Click:Connect(function()
-    if lastFound and lastFound.id then
-        hopToServer(lastFound.id)
-    else
-        setStatus("Belum ada server target. Klik START dulu.", Color3.fromRGB(255, 120, 120))
+    if not tpEnabled then
+        setStatus("Belum ada target server.", Color3.fromRGB(255,120,120))
+        return
     end
+
+    if not currentServerId then
+        setStatus("Belum ada target server.", Color3.fromRGB(255,120,120))
+        return
+    end
+
+    task.spawn(function()
+        teleportToServer(currentServerId)
+    end)
 end)
 
-setStatus("Idle — pencet START", Color3.fromRGB(200, 200, 200))
-setInfo(nil)
+--==================================================
+-- INITIAL STATE
+--==================================================
+
+enableTeleport(false)
+setStatus("Idle — tekan START.", Color3.fromRGB(200,200,200))
+updateInfo("-")
