@@ -1,12 +1,15 @@
 -- ============================================
--- PETAPETA SPEED HACK + ESP
--- Berdasarkan scan struktur game
+-- PETAPETA PVP: CLOWN MENU HACK
+-- Speed Level System + ESP Toggle (Player/Monster)
+-- Berdasarkan scan game ID 125297666294119
 -- ============================================
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 
 local LP = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
@@ -15,34 +18,69 @@ local Camera = Workspace.CurrentCamera
 -- KONFIGURASI
 -- ============================================
 local CONFIG = {
-    WalkSpeed = 60,
-    JumpPower = 120,
-    ESPEnabled = true,
-    ESPRange = 500,
+    SpeedLevel = 1,
+    ESPPlayer = false,
+    ESPMonster = true,
+    ESPItem = false,
+    ESPHideSpot = false,
+    ESPRange = 800,
     ESPColorMonster = Color3.fromRGB(255, 0, 0),
     ESPColorItem = Color3.fromRGB(0, 255, 0),
-    ESPColorPlayer = Color3.fromRGB(0, 150, 255)
+    ESPColorPlayer = Color3.fromRGB(0, 150, 255),
+    ESPColorSafe = Color3.fromRGB(255, 255, 0)
+}
+
+-- Speed per level (makin tinggi makin cepet)
+local SPEED_LEVELS = {
+    [1] = {speed = 16, jump = 50},
+    [2] = {speed = 30, jump = 70},
+    [3] = {speed = 50, jump = 100},
+    [4] = {speed = 80, jump = 130},
+    [5] = {speed = 120, jump = 160},
+    [6] = {speed = 180, jump = 200},
+    [7] = {speed = 250, jump = 250},
+    [8] = {speed = 350, jump = 300},
+    [9] = {speed = 500, jump = 350},
+    [10] = {speed = 700, jump = 400},
 }
 
 -- ============================================
--- SPEED HACK
+-- SPEED HACK (via RemoteEvent SetWalkSpeed)
 -- ============================================
 local function ApplySpeed()
     local char = LP.Character
-    if char then
-        local hum = char:FindFirstChild("Humanoid")
-        if hum then
-            hum.WalkSpeed = CONFIG.WalkSpeed
-            hum.JumpPower = CONFIG.JumpPower
-            hum.UseJumpPower = true
-        end
+    if not char then return end
+    local hum = char:FindFirstChild("Humanoid")
+    if not hum then return end
+
+    local level = SPEED_LEVELS[CONFIG.SpeedLevel]
+    if not level then return end
+
+    -- Server-side speed via remote
+    local setSpeedRemote = ReplicatedStorage:FindFirstChild("SetWalkSpeed")
+    if setSpeedRemote then
+        pcall(function()
+            setSpeedRemote:FireServer(level.speed)
+        end)
     end
+
+    -- Client-side speed
+    hum.WalkSpeed = level.speed
+    hum.JumpPower = level.jump
+    hum.UseJumpPower = true
 end
 
 ApplySpeed()
-LP.CharacterAdded:Connect(function()
+
+LP.CharacterAdded:Connect(function(char)
     task.wait(1)
     ApplySpeed()
+    task.spawn(function()
+        while char.Parent do
+            task.wait(3)
+            pcall(ApplySpeed)
+        end
+    end)
 end)
 
 -- ============================================
@@ -71,7 +109,7 @@ local function CreateESP(object, color, label)
     local billboard = Instance.new("BillboardGui")
     billboard.Name = "ESPLabel"
     billboard.Adornee = object
-    billboard.Size = UDim2.new(0, 100, 0, 30)
+    billboard.Size = UDim2.new(0, 120, 0, 30)
     billboard.StudsOffset = Vector3.new(0, 3, 0)
     billboard.AlwaysOnTop = true
     billboard.Parent = ESPFolder
@@ -97,175 +135,505 @@ local function RemoveESP(object)
     end
 end
 
--- ============================================
--- SCAN & TAGGING OBJECT
--- ============================================
+local function ClearAllESP()
+    for obj, _ in pairs(espObjects) do
+        RemoveESP(obj)
+    end
+end
+
+local function GetBasePart(obj)
+    if obj:IsA("BasePart") then return obj end
+    if obj:IsA("Model") then return obj:FindFirstChildWhichIsA("BasePart") end
+    return nil
+end
+
 local function ScanObjects()
-    for _, obj in pairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") or obj:IsA("Model") then
-            local name = obj.Name:lower()
-            
-            -- Deteksi monster/hantu PETAPETA
-            if name:find("petapeta") or name:find("monster") or name:find("ghost") or name:find("hantu") or name:find("evil") then
-                local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
+    if not CONFIG.ESPPlayer and not CONFIG.ESPMonster and not CONFIG.ESPItem and not CONFIG.ESPHideSpot then return end
+    
+    -- 1. ESP MONSTER
+    if CONFIG.ESPMonster then
+        local enemyFolder = Workspace:FindFirstChild("DummyEnemy")
+        if enemyFolder then
+            for _, obj in pairs(enemyFolder:GetChildren()) do
+                local part = GetBasePart(obj)
                 if part then
                     CreateESP(part, CONFIG.ESPColorMonster, "MONSTER: " .. obj.Name)
                 end
             end
-            
-            -- Deteksi item penting
-            if name:find("key") or name:find("kunci") or name:find("item") or name:find("ritual") or name:find("paper") or name:find("hint") then
-                local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
-                if part then
-                    CreateESP(part, CONFIG.ESPColorItem, "ITEM: " .. obj.Name)
+        end
+        -- Deteksi monster via nama
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                local name = obj.Name:lower()
+                if name:find("petapeta") or name:find("monster") or name:find("ghost") 
+                   or name:find("hantu") or name:find("evil") or name:find("enemy") then
+                    CreateESP(obj, CONFIG.ESPColorMonster, "MONSTER: " .. obj.Name)
                 end
             end
         end
     end
     
-    -- ESP untuk player lain
-    for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LP and player.Character then
-            local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                CreateESP(hrp, CONFIG.ESPColorPlayer, player.Name)
+    -- 2. ESP ITEM
+    if CONFIG.ESPItem then
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                local name = obj.Name:lower()
+                if name:find("ofuda") or name:find("pill") or name:find("cracker") 
+                   or name:find("spirit") or name:find("item") or name:find("pickup")
+                   or name:find("key") or name:find("kunci") or name:find("hint")
+                   or name:find("paper") or name:find("doll") then
+                    CreateESP(obj, CONFIG.ESPColorItem, "ITEM: " .. obj.Name)
+                end
+            end
+        end
+    end
+    
+    -- 3. ESP HIDE SPOT
+    if CONFIG.ESPHideSpot then
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                local name = obj.Name:lower()
+                if name:find("hidepoint") or name:find("hidetansu") or name:find("p_in") then
+                    CreateESP(obj, CONFIG.ESPColorSafe, "HIDE: " .. obj.Name)
+                end
+            end
+        end
+    end
+    
+    -- 4. ESP PLAYER
+    if CONFIG.ESPPlayer then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LP and player.Character then
+                local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    CreateESP(hrp, CONFIG.ESPColorPlayer, player.Name)
+                end
             end
         end
     end
 end
 
--- Scan awal
+task.wait(2)
 ScanObjects()
 
--- Update scan tiap 3 detik
 task.spawn(function()
-    while CONFIG.ESPEnabled do
-        task.wait(3)
+    while true do
+        task.wait(5)
         pcall(ScanObjects)
     end
 end)
 
--- Deteksi player baru
 Players.PlayerAdded:Connect(function(player)
     player.CharacterAdded:Connect(function(char)
         task.wait(2)
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if hrp and CONFIG.ESPEnabled then
-            CreateESP(hrp, CONFIG.ESPColorPlayer, player.Name)
+        if CONFIG.ESPPlayer then
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                CreateESP(hrp, CONFIG.ESPColorPlayer, player.Name)
+            end
         end
     end)
 end)
 
--- Deteksi object baru di workspace
 Workspace.DescendantAdded:Connect(function(obj)
-    if not CONFIG.ESPEnabled then return end
     task.wait(0.5)
     pcall(ScanObjects)
 end)
 
 -- ============================================
--- GUI CONTROL
+-- CLOWN MENU GUI 🤡
 -- ============================================
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "PetaPetaHack"
+ScreenGui.Name = "ClownMenu"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = LP:WaitForChild("PlayerGui")
 
-local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 220, 0, 220)
-Frame.Position = UDim2.new(0.5, -110, 0.5, -110)
-Frame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-Frame.BorderSizePixel = 0
-Frame.Active = true
-Frame.Draggable = true
-Frame.Parent = ScreenGui
+-- Tombol Clown (toggle menu)
+local ClownButton = Instance.new("TextButton")
+ClownButton.Size = UDim2.new(0, 60, 0, 60)
+ClownButton.Position = UDim2.new(0, 20, 0.5, -30)
+ClownButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+ClownButton.BorderSizePixel = 0
+ClownButton.Text = "🤡"
+ClownButton.TextSize = 36
+ClownButton.Font = Enum.Font.GothamBold
+ClownButton.Parent = ScreenGui
 
-local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(0, 10)
-UICorner.Parent = Frame
+local ClownCorner = Instance.new("UICorner")
+ClownCorner.CornerRadius = UDim.new(0, 30)
+ClownCorner.Parent = ClownButton
 
-local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, 0, 0, 35)
-Title.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
-Title.Text = "PETAPETA Hack"
-Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.TextSize = 16
-Title.Font = Enum.Font.GothamBold
-Title.Parent = Frame
+local ClownStroke = Instance.new("UIStroke")
+ClownStroke.Color = Color3.fromRGB(255, 255, 255)
+ClownStroke.Thickness = 2
+ClownStroke.Parent = ClownButton
 
-local TitleCorner = Instance.new("UICorner")
-TitleCorner.CornerRadius = UDim.new(0, 10)
-TitleCorner.Parent = Title
+-- Main Menu Frame (bentuk clown face)
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 260, 0, 420)
+MainFrame.Position = UDim2.new(0, 90, 0.5, -210)
+MainFrame.BackgroundColor3 = Color3.fromRGB(255, 245, 240)
+MainFrame.BorderSizePixel = 0
+MainFrame.Visible = false
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
 
-local function CreateButton(text, yPos, callback)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0.9, 0, 0, 35)
-    btn.Position = UDim2.new(0.05, 0, 0, yPos)
-    btn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-    btn.BorderSizePixel = 0
-    btn.Text = text
-    btn.TextColor3 = Color3.fromRGB(220, 220, 220)
-    btn.TextSize = 13
-    btn.Font = Enum.Font.Gotham
-    btn.Parent = Frame
-    
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 6)
-    corner.Parent = btn
-    
-    btn.MouseButton1Click:Connect(function()
-        callback(btn)
-    end)
-    
-    return btn
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 20)
+MainCorner.Parent = MainFrame
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Color = Color3.fromRGB(255, 50, 50)
+MainStroke.Thickness = 3
+MainStroke.Parent = MainFrame
+
+-- Header Clown (mata + hidung)
+local HeaderFrame = Instance.new("Frame")
+HeaderFrame.Size = UDim2.new(1, 0, 0, 80)
+HeaderFrame.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+HeaderFrame.BorderSizePixel = 0
+HeaderFrame.Parent = MainFrame
+
+local HeaderCorner = Instance.new("UICorner")
+HeaderCorner.CornerRadius = UDim.new(0, 20)
+HeaderCorner.Parent = HeaderFrame
+
+-- Mata kiri
+local EyeLeft = Instance.new("TextLabel")
+EyeLeft.Size = UDim2.new(0, 30, 0, 30)
+EyeLeft.Position = UDim2.new(0.15, 0, 0.15, 0)
+EyeLeft.BackgroundTransparency = 1
+EyeLeft.Text = "👁"
+EyeLeft.TextSize = 24
+EyeLeft.Parent = HeaderFrame
+
+-- Mata kanan
+local EyeRight = Instance.new("TextLabel")
+EyeRight.Size = UDim2.new(0, 30, 0, 30)
+EyeRight.Position = UDim2.new(0.7, 0, 0.15, 0)
+EyeRight.BackgroundTransparency = 1
+EyeRight.Text = "👁"
+EyeRight.TextSize = 24
+EyeRight.Parent = HeaderFrame
+
+-- Hidung
+local Nose = Instance.new("TextLabel")
+Nose.Size = UDim2.new(0, 30, 0, 30)
+Nose.Position = UDim2.new(0.42, 0, 0.35, 0)
+Nose.BackgroundTransparency = 1
+Nose.Text = "🔴"
+Nose.TextSize = 20
+Nose.Parent = HeaderFrame
+
+-- Judul
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Size = UDim2.new(1, 0, 0, 25)
+TitleLabel.Position = UDim2.new(0, 0, 0.7, 0)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Text = "🤡 CLOWN HACK 🤡"
+TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleLabel.TextSize = 14
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.Parent = HeaderFrame
+
+-- Close Button
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 25, 0, 25)
+CloseBtn.Position = UDim2.new(1, -30, 0, 5)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+CloseBtn.BorderSizePixel = 0
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn.TextSize = 12
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.Parent = HeaderFrame
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 6)
+CloseCorner.Parent = CloseBtn
+
+CloseBtn.MouseButton1Click:Connect(function()
+    MainFrame.Visible = false
+end)
+
+-- ============================================
+-- SPEED LEVEL SECTION
+-- ============================================
+local SpeedSection = Instance.new("Frame")
+SpeedSection.Size = UDim2.new(1, -20, 0, 90)
+SpeedSection.Position = UDim2.new(0, 10, 0, 90)
+SpeedSection.BackgroundColor3 = Color3.fromRGB(255, 230, 230)
+SpeedSection.BorderSizePixel = 0
+SpeedSection.Parent = MainFrame
+
+local SpeedCorner = Instance.new("UICorner")
+SpeedCorner.CornerRadius = UDim.new(0, 10)
+SpeedCorner.Parent = SpeedSection
+
+local SpeedLabel = Instance.new("TextLabel")
+SpeedLabel.Size = UDim2.new(1, 0, 0, 25)
+SpeedLabel.Position = UDim2.new(0, 0, 0, 5)
+SpeedLabel.BackgroundTransparency = 1
+SpeedLabel.Text = "⚡ SPEED LEVEL ⚡"
+SpeedLabel.TextColor3 = Color3.fromRGB(200, 30, 30)
+SpeedLabel.TextSize = 13
+SpeedLabel.Font = Enum.Font.GothamBold
+SpeedLabel.Parent = SpeedSection
+
+-- Speed Slider (level display)
+local SpeedDisplay = Instance.new("TextLabel")
+SpeedDisplay.Size = UDim2.new(0, 80, 0, 25)
+SpeedDisplay.Position = UDim2.new(0.5, -40, 0, 30)
+SpeedDisplay.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+SpeedDisplay.BorderSizePixel = 0
+SpeedDisplay.Text = "Lv 1"
+SpeedDisplay.TextColor3 = Color3.fromRGB(255, 255, 255)
+SpeedDisplay.TextSize = 14
+SpeedDisplay.Font = Enum.Font.GothamBold
+SpeedDisplay.Parent = SpeedSection
+
+local SpeedDisplayCorner = Instance.new("UICorner")
+SpeedDisplayCorner.CornerRadius = UDim.new(0, 6)
+SpeedDisplayCorner.Parent = SpeedDisplay
+
+-- Minus Button
+local MinusBtn = Instance.new("TextButton")
+MinusBtn.Size = UDim2.new(0, 35, 0, 35)
+MinusBtn.Position = UDim2.new(0, 10, 0, 30)
+MinusBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+MinusBtn.BorderSizePixel = 0
+MinusBtn.Text = "−"
+MinusBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinusBtn.TextSize = 20
+MinusBtn.Font = Enum.Font.GothamBold
+MinusBtn.Parent = SpeedSection
+
+local MinusCorner = Instance.new("UICorner")
+MinusCorner.CornerRadius = UDim.new(0, 8)
+MinusCorner.Parent = MinusBtn
+
+-- Plus Button
+local PlusBtn = Instance.new("TextButton")
+PlusBtn.Size = UDim2.new(0, 35, 0, 35)
+PlusBtn.Position = UDim2.new(1, -45, 0, 30)
+PlusBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+PlusBtn.BorderSizePixel = 0
+PlusBtn.Text = "+"
+PlusBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+PlusBtn.TextSize = 20
+PlusBtn.Font = Enum.Font.GothamBold
+PlusBtn.Parent = SpeedSection
+
+local PlusCorner = Instance.new("UICorner")
+PlusCorner.CornerRadius = UDim.new(0, 8)
+PlusCorner.Parent = PlusBtn
+
+-- Speed Info
+local SpeedInfo = Instance.new("TextLabel")
+SpeedInfo.Size = UDim2.new(1, 0, 0, 20)
+SpeedInfo.Position = UDim2.new(0, 0, 0, 68)
+SpeedInfo.BackgroundTransparency = 1
+SpeedInfo.Text = "Speed: 16 | Jump: 50"
+SpeedInfo.TextColor3 = Color3.fromRGB(100, 100, 100)
+SpeedInfo.TextSize = 11
+SpeedInfo.Font = Enum.Font.Gotham
+SpeedInfo.Parent = SpeedSection
+
+local function UpdateSpeedDisplay()
+    local level = SPEED_LEVELS[CONFIG.SpeedLevel]
+    SpeedDisplay.Text = "Lv " .. CONFIG.SpeedLevel
+    SpeedInfo.Text = "Speed: " .. level.speed .. " | Jump: " .. level.jump
+    ApplySpeed()
 end
 
-local speedBtn = CreateButton("Speed: ON (60)", 45, function(btn)
-    if CONFIG.WalkSpeed > 30 then
-        CONFIG.WalkSpeed = 16
-        CONFIG.JumpPower = 50
-        btn.Text = "Speed: OFF (16)"
-        btn.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
-    else
-        CONFIG.WalkSpeed = 60
-        CONFIG.JumpPower = 120
-        btn.Text = "Speed: ON (60)"
-        btn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+MinusBtn.MouseButton1Click:Connect(function()
+    if CONFIG.SpeedLevel > 1 then
+        CONFIG.SpeedLevel = CONFIG.SpeedLevel - 1
+        UpdateSpeedDisplay()
     end
-    ApplySpeed()
 end)
-speedBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
 
-local espBtn = CreateButton("ESP: ON", 90, function(btn)
-    CONFIG.ESPEnabled = not CONFIG.ESPEnabled
-    if CONFIG.ESPEnabled then
-        btn.Text = "ESP: ON"
-        btn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
-        ScanObjects()
-    else
-        btn.Text = "ESP: OFF"
-        btn.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
+PlusBtn.MouseButton1Click:Connect(function()
+    if CONFIG.SpeedLevel < 10 then
+        CONFIG.SpeedLevel = CONFIG.SpeedLevel + 1
+        UpdateSpeedDisplay()
+    end
+end)
+
+-- ============================================
+-- ESP SECTION
+-- ============================================
+local ESPSection = Instance.new("Frame")
+ESPSection.Size = UDim2.new(1, -20, 0, 230)
+ESPSection.Position = UDim2.new(0, 10, 0, 190)
+ESPSection.BackgroundColor3 = Color3.fromRGB(230, 240, 255)
+ESPSection.BorderSizePixel = 0
+ESPSection.Parent = MainFrame
+
+local ESPCorner = Instance.new("UICorner")
+ESPCorner.CornerRadius = UDim.new(0, 10)
+ESPCorner.Parent = ESPSection
+
+local ESPLabel = Instance.new("TextLabel")
+ESPLabel.Size = UDim2.new(1, 0, 0, 25)
+ESPLabel.Position = UDim2.new(0, 0, 0, 5)
+ESPLabel.BackgroundTransparency = 1
+ESPLabel.Text = "👁 ESP SETTINGS 👁"
+ESPLabel.TextColor3 = Color3.fromRGB(30, 30, 150)
+ESPLabel.TextSize = 13
+ESPLabel.Font = Enum.Font.GothamBold
+ESPLabel.Parent = ESPSection
+
+local function CreateToggle(text, yPos, initial, callback)
+    local container = Instance.new("Frame")
+    container.Size = UDim2.new(1, -20, 0, 35)
+    container.Position = UDim2.new(0, 10, 0, yPos)
+    container.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    container.BorderSizePixel = 0
+    container.Parent = ESPSection
+    
+    local cCorner = Instance.new("UICorner")
+    cCorner.CornerRadius = UDim.new(0, 8)
+    cCorner.Parent = container
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.6, 0, 1, 0)
+    label.Position = UDim2.new(0, 10, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = text
+    label.TextColor3 = Color3.fromRGB(50, 50, 50)
+    label.TextSize = 13
+    label.Font = Enum.Font.Gotham
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = container
+    
+    local toggle = Instance.new("TextButton")
+    toggle.Size = UDim2.new(0, 60, 0, 25)
+    toggle.Position = UDim2.new(1, -70, 0.5, -12)
+    toggle.BackgroundColor3 = initial and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(200, 50, 50)
+    toggle.BorderSizePixel = 0
+    toggle.Text = initial and "ON" or "OFF"
+    toggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+    toggle.TextSize = 12
+    toggle.Font = Enum.Font.GothamBold
+    toggle.Parent = container
+    
+    local tCorner = Instance.new("UICorner")
+    tCorner.CornerRadius = UDim.new(0, 12)
+    tCorner.Parent = toggle
+    
+    toggle.MouseButton1Click:Connect(function()
+        local state = toggle.Text == "ON"
+        local newState = not state
+        toggle.Text = newState and "ON" or "OFF"
+        toggle.BackgroundColor3 = newState and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(200, 50, 50)
+        callback(newState)
+    end)
+    
+    return toggle
+end
+
+CreateToggle("ESP Player", 35, CONFIG.ESPPlayer, function(state)
+    CONFIG.ESPPlayer = state
+    if not state then
         for obj, _ in pairs(espObjects) do
-            RemoveESP(obj)
+            if obj.Parent and obj.Parent:IsA("Model") and obj.Parent:FindFirstChild("Humanoid") then
+                RemoveESP(obj)
+            end
         end
-    end
-end)
-espBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
-
-local clearBtn = CreateButton("Clear ESP", 135, function()
-    for obj, _ in pairs(espObjects) do
-        RemoveESP(obj)
+    else
+        ScanObjects()
     end
 end)
 
-local destroyBtn = CreateButton("Unload", 180, function()
-    CONFIG.ESPEnabled = false
-    for obj, _ in pairs(espObjects) do
-        RemoveESP(obj)
+CreateToggle("ESP Monster", 75, CONFIG.ESPMonster, function(state)
+    CONFIG.ESPMonster = state
+    if not state then
+        for obj, _ in pairs(espObjects) do
+            if espObjects[obj] and espObjects[obj].billboard then
+                local txt = espObjects[obj].billboard:FindFirstChild("TextLabel")
+                if txt and txt.Text:find("MONSTER") then
+                    RemoveESP(obj)
+                end
+            end
+        end
+    else
+        ScanObjects()
     end
+end)
+
+CreateToggle("ESP Item", 115, CONFIG.ESPItem, function(state)
+    CONFIG.ESPItem = state
+    if not state then
+        for obj, _ in pairs(espObjects) do
+            if espObjects[obj] and espObjects[obj].billboard then
+                local txt = espObjects[obj].billboard:FindFirstChild("TextLabel")
+                if txt and txt.Text:find("ITEM") then
+                    RemoveESP(obj)
+                end
+            end
+        end
+    else
+        ScanObjects()
+    end
+end)
+
+CreateToggle("ESP Hide Spot", 155, CONFIG.ESPHideSpot, function(state)
+    CONFIG.ESPHideSpot = state
+    if not state then
+        for obj, _ in pairs(espObjects) do
+            if espObjects[obj] and espObjects[obj].billboard then
+                local txt = espObjects[obj].billboard:FindFirstChild("TextLabel")
+                if txt and txt.Text:find("HIDE") then
+                    RemoveESP(obj)
+                end
+            end
+        end
+    else
+        ScanObjects()
+    end
+end)
+
+-- Unload Button
+local UnloadBtn = Instance.new("TextButton")
+UnloadBtn.Size = UDim2.new(0.9, 0, 0, 30)
+UnloadBtn.Position = UDim2.new(0.05, 0, 0, 195)
+UnloadBtn.BackgroundColor3 = Color3.fromRGB(150, 30, 30)
+UnloadBtn.BorderSizePixel = 0
+UnloadBtn.Text = "UNLOAD SCRIPT"
+UnloadBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+UnloadBtn.TextSize = 12
+UnloadBtn.Font = Enum.Font.GothamBold
+UnloadBtn.Parent = ESPSection
+
+local UnloadCorner = Instance.new("UICorner")
+UnloadCorner.CornerRadius = UDim.new(0, 8)
+UnloadCorner.Parent = UnloadBtn
+
+UnloadBtn.MouseButton1Click:Connect(function()
+    ClearAllESP()
     ScreenGui:Destroy()
 end)
-destroyBtn.BackgroundColor3 = Color3.fromRGB(150, 30, 30)
+
+-- ============================================
+-- TOGGLE MENU DENGAN TOMBOL CLOWN
+-- ============================================
+local menuOpen = false
+
+ClownButton.MouseButton1Click:Connect(function()
+    menuOpen = not menuOpen
+    MainFrame.Visible = menuOpen
+    
+    if menuOpen then
+        -- Animasi muncul
+        MainFrame.Size = UDim2.new(0, 0, 0, 0)
+        MainFrame.Position = UDim2.new(0, 90, 0.5, -210)
+        TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, 260, 0, 420)
+        }):Play()
+    end
+end)
 
 -- ============================================
 -- HOTKEY
@@ -273,30 +641,43 @@ destroyBtn.BackgroundColor3 = Color3.fromRGB(150, 30, 30)
 UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
     
-    -- F1: Toggle Speed
+    -- F1: Speed Up
     if input.KeyCode == Enum.KeyCode.F1 then
-        if CONFIG.WalkSpeed > 30 then
-            CONFIG.WalkSpeed = 16
-            CONFIG.JumpPower = 50
-        else
-            CONFIG.WalkSpeed = 60
-            CONFIG.JumpPower = 120
+        if CONFIG.SpeedLevel < 10 then
+            CONFIG.SpeedLevel = CONFIG.SpeedLevel + 1
+            UpdateSpeedDisplay()
         end
-        ApplySpeed()
     end
     
-    -- F2: Toggle ESP
+    -- F2: Speed Down
     if input.KeyCode == Enum.KeyCode.F2 then
-        CONFIG.ESPEnabled = not CONFIG.ESPEnabled
-        if CONFIG.ESPEnabled then
-            ScanObjects()
-        else
-            for obj, _ in pairs(espObjects) do
-                RemoveESP(obj)
-            end
+        if CONFIG.SpeedLevel > 1 then
+            CONFIG.SpeedLevel = CONFIG.SpeedLevel - 1
+            UpdateSpeedDisplay()
         end
+    end
+    
+    -- F3: Toggle ESP Player
+    if input.KeyCode == Enum.KeyCode.F3 then
+        CONFIG.ESPPlayer = not CONFIG.ESPPlayer
+        if CONFIG.ESPPlayer then ScanObjects() end
+    end
+    
+    -- F4: Toggle ESP Monster
+    if input.KeyCode == Enum.KeyCode.F4 then
+        CONFIG.ESPMonster = not CONFIG.ESPMonster
+        if CONFIG.ESPMonster then ScanObjects() end
+    end
+    
+    -- RightControl: Toggle Menu
+    if input.KeyCode == Enum.KeyCode.RightControl then
+        menuOpen = not menuOpen
+        MainFrame.Visible = menuOpen
     end
 end)
 
-print("[READY] PETAPETA Speed + ESP aktif!")
-print("[HOTKEY] F1 = Speed | F2 = ESP")
+print("[READY] 🤡 CLOWN MENU PETAPETA PVP aktif!")
+print("[HOTKEY] F1 = Speed Up | F2 = Speed Down")
+print("[HOTKEY] F3 = ESP Player | F4 = ESP Monster")
+print("[HOTKEY] RightControl = Toggle Menu")
+print("[INFO] Speed Level 1-10 | ESP Player/Monster/Item/HideSpot")
