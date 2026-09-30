@@ -15,8 +15,8 @@ local LP = Players.LocalPlayer
 -- ============================================
 local CONFIG = {
     ScriptURL = "https://raw.githubusercontent.com/g83804709-blip/lampuhub/refs/heads/main/lampuhub.lua",
-    VersionURL = "https://raw.githubusercontent.com/USERNAME/REPO/main/version.txt",
-    BroadcastURL = "https://raw.githubusercontent.com/USERNAME/REPO/main/broadcast.txt",
+    VersionURL = "https://raw.githubusercontent.com/g83804709-blip/lampuhub/refs/heads/main/version.txt",
+    BroadcastURL = "https://raw.githubusercontent.com/g83804709-blip/lampuhub/refs/heads/main/broadcast.txt",
     CurrentVersion = "1.0.0",
     CheckInterval = 60, -- cek update tiap 60 detik
     BroadcastInterval = 30, -- cek broadcast tiap 30 detik
