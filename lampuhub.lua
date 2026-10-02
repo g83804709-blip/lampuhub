@@ -1,12 +1,13 @@
 -- ============================================
--- PETAPETA PVP: SPEED + ESP (MINIMALIS)
--- Cuma 2 fitur: Speed Level & ESP Monster/Player
+-- PETAPETA PVP: 🤡 MENU + SPEED + ESP + LOW GFX
 -- ============================================
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+local Terrain = Workspace:FindFirstChildOfClass("Terrain")
 
 local LP = Players.LocalPlayer
 
@@ -17,6 +18,7 @@ local CONFIG = {
     SpeedLevel = 3,
     ESPMonster = true,
     ESPPlayer = false,
+    LowGFX = false,
 }
 
 local SPEED_LEVELS = {
@@ -30,6 +32,18 @@ local SPEED_LEVELS = {
     [8] = {speed = 350, jump = 300},
     [9] = {speed = 500, jump = 350},
     [10] = {speed = 700, jump = 400},
+}
+
+-- Simpan setting awal buat restore
+local ORIGINAL_LIGHTING = {
+    Ambient = Lighting.Ambient,
+    OutdoorAmbient = Lighting.OutdoorAmbient,
+    Brightness = Lighting.Brightness,
+    GlobalShadows = Lighting.GlobalShadows,
+    FogEnd = Lighting.FogEnd,
+    FogStart = Lighting.FogStart,
+    EnvironmentDiffuseScale = Lighting.EnvironmentDiffuseScale,
+    EnvironmentSpecularScale = Lighting.EnvironmentSpecularScale,
 }
 
 -- ============================================
@@ -50,21 +64,17 @@ local function ApplySpeed()
     hum.JumpPower = level.jump
     hum.UseJumpPower = true
 
-    -- Kirim remote max 1x per 5 detik
     local now = tick()
     if now - lastRemoteSent > 5 then
         lastRemoteSent = now
         local remote = ReplicatedStorage:FindFirstChild("SetWalkSpeed")
         if remote then
-            pcall(function()
-                remote:FireServer(level.speed)
-            end)
+            pcall(function() remote:FireServer(level.speed) end)
         end
     end
 end
 
 ApplySpeed()
-
 LP.CharacterAdded:Connect(function()
     task.wait(1)
     ApplySpeed()
@@ -78,7 +88,82 @@ task.spawn(function()
 end)
 
 -- ============================================
--- ESP (MONSTER + PLAYER ONLY)
+-- LOW GRAPHICS MODE
+-- ============================================
+local function SetLowGFX()
+    CONFIG.LowGFX = true
+
+    -- Lighting
+    Lighting.Ambient = Color3.fromRGB(178, 178, 178)
+    Lighting.OutdoorAmbient = Color3.fromRGB(178, 178, 178)
+    Lighting.Brightness = 2
+    Lighting.GlobalShadows = false
+    Lighting.FogEnd = 100000
+    Lighting.FogStart = 100000
+    Lighting.EnvironmentDiffuseScale = 0
+    Lighting.EnvironmentSpecularScale = 0
+    Lighting.ClockTime = 14
+
+    -- Hapus efek post-processing
+    for _, obj in pairs(Lighting:GetChildren()) do
+        if obj:IsA("PostEffect") or obj:IsA("Atmosphere") or obj:IsA("Sky") or obj:IsA("BloomEffect") or obj:IsA("BlurEffect") or obj:IsA("ColorCorrectionEffect") or obj:IsA("SunRaysEffect") or obj:IsA("DepthOfFieldEffect") then
+            pcall(function() obj:Destroy() end)
+        end
+    end
+
+    -- Terrain: matiin dekorasi
+    if Terrain then
+        pcall(function()
+            Terrain.Decoration = false
+            Terrain.WaterWaveSize = 0
+            Terrain.WaterWaveSpeed = 0
+            Terrain.WaterReflectance = 0
+            Terrain.WaterTransparency = 1
+        end)
+    end
+
+    -- Matiin semua ParticleEmitter, Trail, Beam, Smoke, Fire, Sparkles
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        pcall(function()
+            if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam")
+               or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles")
+               or obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then
+                obj.Enabled = false
+            end
+            if obj:IsA("Decal") or obj:IsA("Texture") then
+                obj.Transparency = 1
+            end
+            if obj:IsA("BasePart") then
+                obj.Material = Enum.Material.SmoothPlastic
+                obj.Reflectance = 0
+            end
+        end)
+    end
+
+    -- Setting render Roblox
+    pcall(function()
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+    end)
+end
+
+local function RestoreGFX()
+    CONFIG.LowGFX = false
+    Lighting.Ambient = ORIGINAL_LIGHTING.Ambient
+    Lighting.OutdoorAmbient = ORIGINAL_LIGHTING.OutdoorAmbient
+    Lighting.Brightness = ORIGINAL_LIGHTING.Brightness
+    Lighting.GlobalShadows = ORIGINAL_LIGHTING.GlobalShadows
+    Lighting.FogEnd = ORIGINAL_LIGHTING.FogEnd
+    Lighting.FogStart = ORIGINAL_LIGHTING.FogStart
+    Lighting.EnvironmentDiffuseScale = ORIGINAL_LIGHTING.EnvironmentDiffuseScale
+    Lighting.EnvironmentSpecularScale = ORIGINAL_LIGHTING.EnvironmentSpecularScale
+
+    pcall(function()
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
+    end)
+end
+
+-- ============================================
+-- ESP
 -- ============================================
 local ESPFolder = Instance.new("Folder")
 ESPFolder.Name = "PetaPetaESP"
@@ -135,8 +220,8 @@ local function ScanPlayer()
 end
 
 local function ScanAll()
-    if CONFIG.ESPMonster then ScanMonster() end
-    if CONFIG.ESPPlayer then ScanPlayer() end
+    if CONFIG.ESPMonster then pcall(ScanMonster) end
+    if CONFIG.ESPPlayer then pcall(ScanPlayer) end
 end
 
 task.wait(2)
@@ -150,18 +235,43 @@ task.spawn(function()
 end)
 
 -- ============================================
--- GUI MENU
+-- GUI: TOMBOL 🤡 + MENU
 -- ============================================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "PetaPetaMenu"
 ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.Parent = LP:WaitForChild("PlayerGui")
 
+-- Tombol Clown (emoji di tengah)
+local ClownButton = Instance.new("TextButton")
+ClownButton.Size = UDim2.new(0, 60, 0, 60)
+ClownButton.Position = UDim2.new(0, 20, 0.5, -30)
+ClownButton.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+ClownButton.BorderSizePixel = 0
+ClownButton.Text = "🤡"
+ClownButton.TextSize = 36
+ClownButton.Font = Enum.Font.GothamBold
+ClownButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+ClownButton.AutoButtonColor = false
+ClownButton.Parent = ScreenGui
+
+local ClownCorner = Instance.new("UICorner")
+ClownCorner.CornerRadius = UDim.new(0, 30)
+ClownCorner.Parent = ClownButton
+
+local ClownStroke = Instance.new("UIStroke")
+ClownStroke.Color = Color3.fromRGB(255, 255, 255)
+ClownStroke.Thickness = 2
+ClownStroke.Parent = ClownButton
+
+-- Main Menu
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 240, 0, 260)
-MainFrame.Position = UDim2.new(0, 20, 0.5, -130)
+MainFrame.Size = UDim2.new(0, 240, 0, 300)
+MainFrame.Position = UDim2.new(0, 90, 0.5, -150)
 MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
 MainFrame.BorderSizePixel = 0
+MainFrame.Visible = false
 MainFrame.Active = true
 MainFrame.Draggable = true
 MainFrame.Parent = ScreenGui
@@ -175,7 +285,6 @@ MainStroke.Color = Color3.fromRGB(255, 80, 80)
 MainStroke.Thickness = 2
 MainStroke.Parent = MainFrame
 
--- Header
 local Header = Instance.new("TextLabel")
 Header.Size = UDim2.new(1, 0, 0, 35)
 Header.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
@@ -189,6 +298,25 @@ Header.Parent = MainFrame
 local HeaderCorner = Instance.new("UICorner")
 HeaderCorner.CornerRadius = UDim.new(0, 12)
 HeaderCorner.Parent = Header
+
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 25, 0, 25)
+CloseBtn.Position = UDim2.new(1, -30, 0, 5)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+CloseBtn.BorderSizePixel = 0
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn.TextSize = 12
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.Parent = Header
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 6)
+CloseCorner.Parent = CloseBtn
+
+CloseBtn.MouseButton1Click:Connect(function()
+    MainFrame.Visible = false
+end)
 
 -- Speed Section
 local SpeedBox = Instance.new("Frame")
@@ -310,12 +438,12 @@ ESPTitle.TextSize = 12
 ESPTitle.Font = Enum.Font.GothamBold
 ESPTitle.Parent = ESPBox
 
-local function CreateToggle(text, yPos, initial, callback)
+local function CreateToggle(parent, text, yPos, initial, callback)
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, -20, 0, 30)
     row.Position = UDim2.new(0, 10, 0, yPos)
     row.BackgroundTransparency = 1
-    row.Parent = ESPBox
+    row.Parent = parent
 
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(0.6, 0, 1, 0)
@@ -351,20 +479,48 @@ local function CreateToggle(text, yPos, initial, callback)
     end)
 end
 
-CreateToggle("ESP Monster", 28, CONFIG.ESPMonster, function(state)
+CreateToggle(ESPBox, "ESP Monster", 28, CONFIG.ESPMonster, function(state)
     CONFIG.ESPMonster = state
     if state then pcall(ScanMonster) end
 end)
 
-CreateToggle("ESP Player", 60, CONFIG.ESPPlayer, function(state)
+CreateToggle(ESPBox, "ESP Player", 60, CONFIG.ESPPlayer, function(state)
     CONFIG.ESPPlayer = state
     if state then pcall(ScanPlayer) end
+end)
+
+-- Low GFX Button
+local LowGfxBtn = Instance.new("TextButton")
+LowGfxBtn.Size = UDim2.new(0.9, 0, 0, 30)
+LowGfxBtn.Position = UDim2.new(0.05, 0, 0, 255)
+LowGfxBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 150)
+LowGfxBtn.BorderSizePixel = 0
+LowGfxBtn.Text = "LOW GRAPHICS: OFF"
+LowGfxBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+LowGfxBtn.TextSize = 11
+LowGfxBtn.Font = Enum.Font.GothamBold
+LowGfxBtn.Parent = MainFrame
+
+local LowGfxCorner = Instance.new("UICorner")
+LowGfxCorner.CornerRadius = UDim.new(0, 8)
+LowGfxCorner.Parent = LowGfxBtn
+
+LowGfxBtn.MouseButton1Click:Connect(function()
+    if CONFIG.LowGFX then
+        RestoreGFX()
+        LowGfxBtn.Text = "LOW GRAPHICS: OFF"
+        LowGfxBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 150)
+    else
+        SetLowGFX()
+        LowGfxBtn.Text = "LOW GRAPHICS: ON"
+        LowGfxBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+    end
 end)
 
 -- Unload Button
 local UnloadBtn = Instance.new("TextButton")
 UnloadBtn.Size = UDim2.new(0.9, 0, 0, 28)
-UnloadBtn.Position = UDim2.new(0.05, 0, 0, 255)
+UnloadBtn.Position = UDim2.new(0.05, 0, 0, 290)
 UnloadBtn.BackgroundColor3 = Color3.fromRGB(150, 30, 30)
 UnloadBtn.BorderSizePixel = 0
 UnloadBtn.Text = "UNLOAD"
@@ -379,7 +535,16 @@ UnloadCorner.Parent = UnloadBtn
 
 UnloadBtn.MouseButton1Click:Connect(function()
     ClearAllESP()
+    if CONFIG.LowGFX then RestoreGFX() end
     ScreenGui:Destroy()
+end)
+
+-- Toggle Menu
+local menuOpen = false
+
+ClownButton.MouseButton1Click:Connect(function()
+    menuOpen = not menuOpen
+    MainFrame.Visible = menuOpen
 end)
 
 -- ============================================
@@ -401,7 +566,13 @@ UserInputService.InputBegan:Connect(function(input, gpe)
             UpdateSpeedDisplay()
         end
     end
+
+    if input.KeyCode == Enum.KeyCode.RightControl then
+        menuOpen = not menuOpen
+        MainFrame.Visible = menuOpen
+    end
 end)
 
-print("[READY] PETAPETA Speed + ESP aktif!")
-print("[INFO] F1 = Speed Up | F2 = Speed Down")
+print("[READY] 🤡 PETAPETA Menu aktif!")
+print("[INFO] Klik tombol 🤡 buat buka menu")
+print("[INFO] Low Graphics = boost FPS drastis")
